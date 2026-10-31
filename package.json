@@ -33,6 +33,7 @@
     "check": "tsc -p tsconfig.json --noEmit",
     "format": "prettier --write \"src/**/*.ts\" \"test/**/*.ts\" \"*.json\" \"README.md\"",
     "package": "tsc -p tsconfig.json && python3 scripts/package.py",
+    "install:local": "npm run package && code --install-extension \"$npm_package_name-$npm_package_version.vsix\" --force",
     "package:vsce": "npx @vscode/vsce package"
   },
   "contributes": {
@@ -68,6 +69,18 @@
       {
         "command": "VXCode.test",
         "title": "VXCode: Test"
+      },
+      {
+        "command": "VXCode.clean",
+        "title": "VXCode: Clean Build Folder"
+      },
+      {
+        "command": "VXCode.archive",
+        "title": "VXCode: Archive"
+      },
+      {
+        "command": "VXCode.toggleDebugger",
+        "title": "VXCode: Toggle Debugger on Run"
       }
     ],
     "configuration": {
@@ -87,6 +100,11 @@
           "type": "string",
           "default": "**/{node_modules,Pods,Carthage,.git,build,DerivedData}/**",
           "description": "Glob excluded from project discovery."
+        },
+        "VXCode.attachDebugger": {
+          "type": "boolean",
+          "default": false,
+          "description": "Attach the Swift debugger (swiftlang.swift-vscode) when Build and Run launches the app."
         }
       }
     },
