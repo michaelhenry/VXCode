@@ -27,6 +27,11 @@ export interface Application {
   path: string;
 }
 
+// `simctl launch` prints "<bundle id>: <pid>".
+export function launchedPid(output: string): number | undefined {
+  const match = output.match(/:\s*(\d+)\s*$/);
+  return match ? Number(match[1]) : undefined;
+}
 export function projectArgs(project: string): string[] {
   return [project.endsWith('.xcworkspace') ? '-workspace' : '-project', project];
 }
@@ -47,6 +52,20 @@ export function buildArgs(
     `platform=iOS Simulator,id=${device}`,
     '-derivedDataPath',
     derivedData,
+  ];
+}
+// No -configuration, so the scheme's Archive action (usually Release) decides, as in Xcode.
+export function archiveArgs(project: string, scheme: string, derivedData: string, archivePath: string): string[] {
+  return [
+    ...projectArgs(project),
+    '-scheme',
+    scheme,
+    '-destination',
+    'generic/platform=iOS',
+    '-derivedDataPath',
+    derivedData,
+    '-archivePath',
+    archivePath,
   ];
 }
 export function schemes(data: XcodeProjectData): string[] {

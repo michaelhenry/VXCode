@@ -1,5 +1,7 @@
 import * as vscode from 'vscode';
-import { spawn } from 'child_process';
+import { execFile, spawn } from 'child_process';
+import * as fs from 'fs';
+import * as os from 'os';
 import * as path from 'path';
 import * as crypto from 'crypto';
 import * as core from './core';
@@ -24,6 +26,7 @@ export function activate(context: vscode.ExtensionContext): void {
     status,
     error: lastError,
     configuration: config().get('configuration'),
+    debug: !!config().get('attachDebugger'),
   }));
   context.subscriptions.push(
     vscode.window.registerWebviewViewProvider('VXCode.launch', sidebar),
@@ -112,6 +115,26 @@ export function activate(context: vscode.ExtensionContext): void {
     });
   }
   const json = async (command: string, args: string[], cwd?: string) => JSON.parse(await exec(command, args, cwd));
+  const appCache = new Map<string, core.Application[]>();
+  const packageFlags = new Map<string, Promise<string[]>>();
+  // Older Xcode rejects unknown flags, so probe once per developer directory.
+  function packageArgs(): Promise<string[]> {
+    const dir = config().get<string>('developerDirectory') || '';
+    if (!packageFlags.has(dir))
+      packageFlags.set(
+        dir,
+        new Promise((resolve) =>
+          execFile(
+            '/usr/bin/xcodebuild',
+            ['-help'],
+            { env: dir ? { ...process.env, DEVELOPER_DIR: dir } : process.env },
+            (_error, stdout, stderr) =>
+              resolve(/-skipPackageUpdates\b/.test(stdout + stderr) ? ['-skipPackageUpdates'] : []),
+          ),
+        ),
+      );
+    return packageFlags.get(dir)!;
+  }
   async function selectProject() {
     const files = await vscode.workspace.findFiles(
       '**/{*.xcodeproj/project.pbxproj,*.xcworkspace/contents.xcworkspacedata}',
@@ -156,20 +179,57 @@ export function activate(context: vscode.ExtensionContext): void {
     device = chosen.value;
     sidebar.refresh();
   }
-  async function build(run, test = false) {
+  async function derivedDataPath() {
+    const hash = crypto.createHash('sha256').update(project).digest('hex').slice(0, 16);
+    const derived = path.join(context.globalStorageUri.fsPath, 'DerivedData', hash);
+    await vscode.workspace.fs.createDirectory(vscode.Uri.file(derived));
+    return derived;
+  }
+  async function prepare(needsDevice = true) {
     if (!project) await selectProject();
     if (!scheme) await selectScheme();
-    if (!device) await selectSimulator();
+    if (needsDevice && !device) await selectSimulator();
     if (!(await vscode.workspace.saveAll(false)))
       throw new Error('Some files could not be saved. Save them before building.');
     checkCancelled();
     diagnostics.clear();
     output.show(true);
+  }
+  async function archive() {
+    await prepare(false);
+    const local = new Date(Date.now() - new Date().getTimezoneOffset() * 60000);
+    const stamp = local.toISOString().replace('T', ' ').replace(/:/g, '.').slice(0, 19);
+    // Xcode's Organizer lists archives saved under this folder.
+    const archivePath = path.join(
+      os.homedir(),
+      'Library/Developer/Xcode/Archives',
+      stamp.slice(0, 10),
+      `${scheme} ${stamp}.xcarchive`,
+    );
+    const args = [...core.archiveArgs(project, scheme, await derivedDataPath(), archivePath), ...(await packageArgs())];
+    await exec('/usr/bin/xcodebuild', [...args, 'archive'], path.dirname(project), true);
+    const choice = await vscode.window.showInformationMessage(`Archived ${scheme}.`, 'Reveal in Finder');
+    if (choice) await vscode.commands.executeCommand('revealFileInOS', vscode.Uri.file(archivePath));
+  }
+  async function build(run, test = false, action?: 'clean') {
+    await prepare();
     const cwd = path.dirname(project);
-    const hash = crypto.createHash('sha256').update(project).digest('hex').slice(0, 16);
-    const derived = path.join(context.globalStorageUri.fsPath, 'DerivedData', hash);
-    await vscode.workspace.fs.createDirectory(vscode.Uri.file(derived));
-    const args = core.buildArgs(project, scheme, device.udid, config().get<string>('configuration') || 'Debug', derived);
+    const args = [
+      ...core.buildArgs(
+        project,
+        scheme,
+        device.udid,
+        config().get<string>('configuration') || 'Debug',
+        await derivedDataPath(),
+      ),
+      ...(await packageArgs()),
+    ];
+    if (action === 'clean') {
+      await exec('/usr/bin/xcodebuild', [...args, 'clean'], cwd, true);
+      appCache.clear();
+      vscode.window.showInformationMessage('Xcode clean succeeded.');
+      return;
+    }
     await exec('/usr/bin/xcodebuild', [...args, test ? 'test' : 'build'], cwd, true);
     if (test) {
       vscode.window.showInformationMessage('Xcode tests passed.');
@@ -179,7 +239,13 @@ export function activate(context: vscode.ExtensionContext): void {
       vscode.window.showInformationMessage('Xcode build succeeded.');
       return;
     }
-    const apps = core.applications(await json('/usr/bin/xcodebuild', [...args, '-showBuildSettings', '-json'], cwd));
+    const key = args.join('\0');
+    // shortcut: a renamed product whose old .app still exists launches stale; clearing DerivedData resets it.
+    let apps = appCache.get(key)?.filter((a) => fs.existsSync(a.path)) || [];
+    if (!apps.length) {
+      apps = core.applications(await json('/usr/bin/xcodebuild', [...args, '-showBuildSettings', '-json'], cwd));
+      appCache.set(key, apps);
+    }
     if (!apps.length) throw new Error('Scheme produced no runnable iOS Simulator app. Select an application scheme.');
     const app =
       apps.length === 1
@@ -205,8 +271,40 @@ export function activate(context: vscode.ExtensionContext): void {
     await exec('/usr/bin/xcrun', ['simctl', 'bootstatus', device.udid, '-b'], cwd);
     await exec('/usr/bin/open', ['-a', 'Simulator', '--args', '-CurrentDeviceUDID', device.udid], cwd);
     await exec('/usr/bin/xcrun', ['simctl', 'install', device.udid, app.path], cwd);
-    await exec('/usr/bin/xcrun', ['simctl', 'launch', '--terminate-running-process', device.udid, bundle], cwd);
-    vscode.window.showInformationMessage(`Launched ${bundle} on ${device.name}.`);
+    const debug = config().get<boolean>('attachDebugger');
+    if (debug && !vscode.extensions.getExtension('swiftlang.swift-vscode'))
+      throw new Error(
+        'Debugging requires the Swift extension (swiftlang.swift-vscode). Install it or turn off the debugger.',
+      );
+    const launched = await exec(
+      '/usr/bin/xcrun',
+      [
+        'simctl',
+        'launch',
+        '--terminate-running-process',
+        ...(debug ? ['--wait-for-debugger'] : []),
+        device.udid,
+        bundle,
+      ],
+      cwd,
+    );
+    if (debug) {
+      const pid = core.launchedPid(launched);
+      const attached =
+        pid !== undefined &&
+        (await vscode.debug.startDebugging(vscode.workspace.workspaceFolders?.[0], {
+          type: 'swift',
+          request: 'attach',
+          name: `VXCode: ${bundle}`,
+          pid,
+        }));
+      if (!attached) {
+        // The app is suspended waiting for a debugger; don't leave it hanging.
+        await exec('/usr/bin/xcrun', ['simctl', 'terminate', device.udid, bundle], cwd).catch(() => undefined);
+        throw new Error(`Could not attach the debugger to ${bundle}. See VXCode output.`);
+      }
+    }
+    vscode.window.showInformationMessage(`${debug ? 'Debugging' : 'Launched'} ${bundle} on ${device.name}.`);
   }
   function register(name, action) {
     context.subscriptions.push(
@@ -230,13 +328,13 @@ export function activate(context: vscode.ExtensionContext): void {
               try {
                 await action();
                 status =
-                  name === 'test'
-                    ? 'Tests passed'
-                    : name === 'run'
-                      ? 'App launched'
-                      : name === 'build'
-                        ? 'Build succeeded'
-                        : 'Ready';
+                  {
+                    test: 'Tests passed',
+                    run: 'App launched',
+                    build: 'Build succeeded',
+                    clean: 'Clean succeeded',
+                    archive: 'Archive succeeded',
+                  }[name] || 'Ready';
               } finally {
                 subscription.dispose();
               }
@@ -260,8 +358,13 @@ export function activate(context: vscode.ExtensionContext): void {
   register('test', () => build(false, true));
   register('build', () => build(false));
   register('run', () => build(true));
+  register('clean', () => build(false, false, 'clean'));
+  register('archive', archive);
   context.subscriptions.push(
     vscode.commands.registerCommand('VXCode.cancel', stop),
     vscode.commands.registerCommand('VXCode.showOutput', () => output.show()),
+    vscode.commands.registerCommand('VXCode.toggleDebugger', () =>
+      config().update('attachDebugger', !config().get<boolean>('attachDebugger'), vscode.ConfigurationTarget.Global),
+    ),
   );
 }
