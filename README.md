@@ -1,3 +1,6 @@
+ <img width="705" height="573" alt="Screenshot 2026-10-31 at 9 19 27 pm" src="https://github.com/user-attachments/assets/948fd943-b469-4117-9c42-022fcd7ac704" />
+
+
 # VXCode
 
 VXCode is a VS Code extension for building and running iOS Simulator apps with Xcode on macOS.
