@@ -2,7 +2,7 @@
   "name": "vxcode",
   "displayName": "VXCode",
   "description": "Build and run iOS Simulator apps with Xcode tools on macOS.",
-  "version": "1.0.2",
+  "version": "1.0.3",
   "publisher": "MichaelHenry19",
   "license": "MIT",
   "engines": {
