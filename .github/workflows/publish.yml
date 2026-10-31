@@ -1,0 +1,66 @@
+name: Publish
+on:
+  push:
+    branches:
+      - main
+permissions:
+  contents: read
+jobs:
+  publish:
+    runs-on: ubuntu-latest
+    environment: production
+    permissions:
+      contents: read
+      id-token: write
+    concurrency:
+      group: marketplace-publish
+      cancel-in-progress: false
+    steps:
+      - uses: actions/checkout@v6
+        with:
+          fetch-depth: 0
+      - name: Detect version change
+        id: version
+        env:
+          BEFORE_SHA: ${{ github.event.before }}
+        run: |
+          node <<'NODE'
+          const fs = require('node:fs');
+          const { execFileSync } = require('node:child_process');
+          const current = JSON.parse(fs.readFileSync('package.json', 'utf8')).version;
+          const before = process.env.BEFORE_SHA;
+          let changed = true;
+          if (!/^0+$/.test(before)) {
+            const previous = JSON.parse(execFileSync('git', ['show', `${before}:package.json`], { encoding: 'utf8' }));
+            changed = previous.version !== current;
+          }
+          fs.appendFileSync(process.env.GITHUB_OUTPUT, `changed=${changed}\n`);
+          console.log(changed ? `Publishing version ${current}` : `Version ${current} unchanged; skipping publication`);
+          NODE
+      - uses: actions/setup-node@v7
+        if: steps.version.outputs.changed == 'true'
+        with:
+          node-version: '24'
+          package-manager-cache: false
+      - name: Install dependencies
+        if: steps.version.outputs.changed == 'true'
+        run: npm ci
+      - name: Validate and build extension
+        if: steps.version.outputs.changed == 'true'
+        run: |
+          npm run check
+          npm test
+          npm run package
+      - name: Build Marketplace VSIX
+        if: steps.version.outputs.changed == 'true'
+        run: npx --yes @vscode/vsce package --out marketplace.vsix
+      - name: Upload VSIX artifact
+        if: steps.version.outputs.changed == 'true'
+        uses: actions/upload-artifact@v4
+        with:
+          name: vxcode-vsix
+          path: marketplace.vsix
+          if-no-files-found: error
+      - name: Publish to Visual Studio Marketplace
+        if: steps.version.outputs.changed == 'true'
+        run: npx --yes @vscode/vsce publish --oidc --packagePath marketplace.vsix

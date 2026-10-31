@@ -1,0 +1,57 @@
+name: Format PR
+on:
+  pull_request:
+    types: [opened, synchronize, reopened]
+permissions:
+  contents: read
+jobs:
+  format:
+    if: github.event.pull_request.head.repo.full_name == github.repository && github.actor != 'dependabot[bot]'
+    runs-on: ubuntu-latest
+    permissions:
+      contents: write
+    concurrency:
+      group: format-pr-${{ github.event.pull_request.number }}
+      cancel-in-progress: false
+    steps:
+      - uses: actions/checkout@v6
+        with:
+          ref: ${{ github.head_ref }}
+          fetch-depth: 0
+      - uses: actions/setup-node@v7
+        with:
+          node-version: '24'
+          package-manager-cache: false
+      - name: Install dependencies
+        run: npm ci --ignore-scripts
+      - name: Format changed files
+        env:
+          BASE_SHA: ${{ github.event.pull_request.base.sha }}
+        run: |
+          node <<'NODE'
+          const { execFileSync } = require('node:child_process');
+          const files = execFileSync('git', ['diff', '--name-only', '--diff-filter=ACMR', '-z', `${process.env.BASE_SHA}...HEAD`], { encoding: 'utf8' })
+            .split('\0')
+            .filter(file => /^(src|test)\/.*\.ts$/.test(file) || /^[^/]+\.(json|md)$/.test(file));
+          for (const file of files) {
+            execFileSync('node', ['node_modules/prettier/bin/prettier.cjs', '--write', '--', file], { stdio: 'inherit' });
+            execFileSync('git', ['add', '--', file]);
+          }
+          NODE
+      - name: Validate formatted code
+        run: |
+          npm run check
+          npm test
+          npm run package
+      - name: Commit formatting changes
+        env:
+          PR_BRANCH: ${{ github.head_ref }}
+        run: |
+          if git diff --cached --quiet; then
+            echo "No formatting changes needed."
+            exit 0
+          fi
+          git config user.name 'github-actions[bot]'
+          git config user.email '41898282+github-actions[bot]@users.noreply.github.com'
+          git commit -m "style: format PR files with Prettier"
+          git push origin "HEAD:refs/heads/$PR_BRANCH"

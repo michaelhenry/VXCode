@@ -1,0 +1,126 @@
+{
+  "name": "vxcode",
+  "displayName": "VXCode",
+  "description": "Build and run iOS Simulator apps with Xcode tools on macOS.",
+  "version": "1.0.1",
+  "publisher": "MichaelHenry19",
+  "license": "MIT",
+  "engines": {
+    "vscode": "^1.85.0"
+  },
+  "categories": [
+    "Other"
+  ],
+  "main": "./build/src/extension.js",
+  "extensionKind": [
+    "ui"
+  ],
+  "capabilities": {
+    "untrustedWorkspaces": {
+      "supported": false
+    },
+    "virtualWorkspaces": {
+      "supported": false
+    }
+  },
+  "activationEvents": [
+    "workspaceContains:**/*.xcodeproj/project.pbxproj",
+    "workspaceContains:**/*.xcworkspace/contents.xcworkspacedata",
+    "onView:VXCode.launch"
+  ],
+  "scripts": {
+    "test": "tsc -p tsconfig.json && node build/test/core.test.js && node build/test/sidebar.test.js",
+    "check": "tsc -p tsconfig.json --noEmit",
+    "format": "prettier --write \"src/**/*.ts\" \"test/**/*.ts\" \"*.json\" \"README.md\"",
+    "package": "tsc -p tsconfig.json && python3 scripts/package.py",
+    "package:vsce": "npx @vscode/vsce package"
+  },
+  "contributes": {
+    "commands": [
+      {
+        "command": "VXCode.selectProject",
+        "title": "VXCode: Select Project or Workspace"
+      },
+      {
+        "command": "VXCode.selectScheme",
+        "title": "VXCode: Select Scheme"
+      },
+      {
+        "command": "VXCode.selectSimulator",
+        "title": "VXCode: Select Simulator"
+      },
+      {
+        "command": "VXCode.build",
+        "title": "VXCode: Build"
+      },
+      {
+        "command": "VXCode.run",
+        "title": "VXCode: Build and Run"
+      },
+      {
+        "command": "VXCode.cancel",
+        "title": "VXCode: Cancel Current Operation"
+      },
+      {
+        "command": "VXCode.showOutput",
+        "title": "VXCode: Show Output"
+      },
+      {
+        "command": "VXCode.test",
+        "title": "VXCode: Test"
+      }
+    ],
+    "configuration": {
+      "title": "VXCode",
+      "properties": {
+        "VXCode.configuration": {
+          "type": "string",
+          "default": "Debug",
+          "description": "Xcode build configuration."
+        },
+        "VXCode.developerDirectory": {
+          "type": "string",
+          "default": "",
+          "description": "Optional Xcode Contents/Developer path (DEVELOPER_DIR)."
+        },
+        "VXCode.discoveryExclude": {
+          "type": "string",
+          "default": "**/{node_modules,Pods,Carthage,.git,build,DerivedData}/**",
+          "description": "Glob excluded from project discovery."
+        }
+      }
+    },
+    "viewsContainers": {
+      "activitybar": [
+        {
+          "id": "VXCode",
+          "title": "VXCode",
+          "icon": "media/activitybar.svg"
+        }
+      ]
+    },
+    "views": {
+      "VXCode": [
+        {
+          "id": "VXCode.launch",
+          "name": "Launch Center",
+          "type": "webview"
+        }
+      ]
+    }
+  },
+  "icon": "media/vxcode-icon-greyscale.png",
+  "devDependencies": {
+    "@types/node": "^20.0.0",
+    "@types/vscode": "^1.85.0",
+    "prettier": "^3.0.0",
+    "typescript": "^5.0.0"
+  },
+  "keywords": [
+    "xcode",
+    "ios",
+    "swift",
+    "simulator",
+    "xcodebuild"
+  ]
+}
