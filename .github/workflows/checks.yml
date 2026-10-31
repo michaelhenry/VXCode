@@ -8,6 +8,9 @@ permissions:
 jobs:
   verify:
     runs-on: ubuntu-latest
+    permissions:
+      contents: read
+      pull-requests: write
     steps:
       - uses: actions/checkout@v6
       - uses: actions/setup-node@v7
@@ -19,6 +22,33 @@ jobs:
       - name: Check JavaScript
         run: npm run check
       - name: Run unit tests
-        run: npm test
+        id: tests
+        run: |
+          set -o pipefail
+          npm test 2>&1 | tee test-output.txt
+      - name: Write unit test report
+        if: always() && steps.tests.outcome != 'skipped'
+        env:
+          RESULT: ${{ steps.tests.outcome == 'success' && '✅ Passed' || '❌ Failed' }}
+        run: |
+          {
+            echo '## Unit test report'
+            echo
+            echo "**Result:** $RESULT · commit \`${GITHUB_SHA::7}\` · [run log]($GITHUB_SERVER_URL/$GITHUB_REPOSITORY/actions/runs/$GITHUB_RUN_ID)"
+            echo
+            echo '```'
+            cat test-output.txt
+            echo '```'
+          } > test-report.md
+          cat test-report.md >> "$GITHUB_STEP_SUMMARY"
+      # Fork and Dependabot PRs get a read-only token, so they only get the job summary.
+      - name: Post unit test report on PR
+        if: >-
+          always() && steps.tests.outcome != 'skipped' && github.event_name == 'pull_request' &&
+          github.event.pull_request.head.repo.full_name == github.repository && github.actor != 'dependabot[bot]'
+        env:
+          GH_TOKEN: ${{ github.token }}
+          PR: ${{ github.event.pull_request.number }}
+        run: gh pr comment "$PR" --body-file test-report.md --edit-last --create-if-none
       - name: Build local VSIX
         run: npm run package
