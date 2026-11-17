@@ -6,6 +6,7 @@ import * as path from 'path';
 import * as crypto from 'crypto';
 import * as core from './core';
 import { Sidebar } from './sidebar';
+import { packageActions, packagesHtml } from './packages';
 
 export function activate(context: vscode.ExtensionContext): void {
   const output = vscode.window.createOutputChannel('VXCode');
@@ -348,6 +349,7 @@ export function activate(context: vscode.ExtensionContext): void {
                     build: 'Build succeeded',
                     clean: 'Clean succeeded',
                     archive: 'Archive succeeded',
+                    resolvePackages: 'Packages resolved',
                   }[name] || 'Ready';
               } finally {
                 subscription.dispose();
@@ -366,6 +368,193 @@ export function activate(context: vscode.ExtensionContext): void {
       }),
     );
   }
+  const cancelledSelection = () => new Error('Selection cancelled.');
+  const readPbx = (file: string) =>
+    new Promise<any>((resolve, reject) =>
+      execFile(
+        '/usr/bin/plutil',
+        ['-convert', 'json', '-o', '-', file],
+        { maxBuffer: 256 * 1024 * 1024 },
+        (error, stdout, stderr) => (error ? reject(new Error(stderr || error.message)) : resolve(JSON.parse(stdout))),
+      ),
+    );
+  const lintPbx = (file: string) =>
+    new Promise<void>((resolve, reject) =>
+      execFile('/usr/bin/plutil', ['-lint', '-s', file], (error, stdout) =>
+        error ? reject(new Error(stdout || error.message)) : resolve(),
+      ),
+    );
+  async function xcodeprojFor(selected: string) {
+    if (selected.endsWith('.xcodeproj')) return selected;
+    const data = fs.readFileSync(path.join(selected, 'contents.xcworkspacedata'), 'utf8');
+    const projects = [...data.matchAll(/location\s*=\s*"(group|container|absolute):([^"]+\.xcodeproj)"/g)]
+      .map(([, kind, location]) => (kind === 'absolute' ? location : path.resolve(path.dirname(selected), location)))
+      .filter((p) => path.basename(p) !== 'Pods.xcodeproj' && fs.existsSync(p));
+    if (!projects.length) throw new Error('No Xcode project found in this workspace.');
+    if (projects.length === 1) return projects[0];
+    const chosen = await vscode.window.showQuickPick(
+      projects.map((p) => ({ label: path.basename(p), description: p, value: p })),
+      { placeHolder: 'Select the project whose packages to manage' },
+    );
+    if (!chosen) throw cancelledSelection();
+    return chosen.value;
+  }
+  let packagesPanel: vscode.WebviewPanel | undefined;
+  let packagesFile = '';
+  async function showPackages() {
+    if (!project) await selectProject();
+    packagesFile = path.join(await xcodeprojFor(project), 'project.pbxproj');
+    if (!packagesPanel) {
+      packagesPanel = vscode.window.createWebviewPanel(
+        'VXCode.packages',
+        'Package Dependencies',
+        vscode.ViewColumn.Active,
+        { enableScripts: true, localResourceRoots: [] },
+      );
+      packagesPanel.onDidDispose(() => (packagesPanel = undefined), null, context.subscriptions);
+      packagesPanel.webview.onDidReceiveMessage(handlePackageMessage, null, context.subscriptions);
+    }
+    packagesPanel.reveal();
+    await renderPackages();
+  }
+  async function renderPackages() {
+    if (!packagesPanel) return;
+    const nonce = crypto.randomBytes(24).toString('base64');
+    const packages = core.packageDependencies(await readPbx(packagesFile));
+    packagesPanel.webview.html = packagesHtml(nonce, path.dirname(packagesFile), packages);
+  }
+  async function editPbx(change: (text: string, pbx: any) => string) {
+    const original = fs.readFileSync(packagesFile, 'utf8');
+    fs.writeFileSync(packagesFile, change(original, await readPbx(packagesFile)));
+    try {
+      await lintPbx(packagesFile);
+    } catch (error) {
+      fs.writeFileSync(packagesFile, original);
+      throw new Error(`The edit produced an invalid project file and was reverted. ${error.message}`);
+    }
+  }
+  async function ask(options: vscode.InputBoxOptions) {
+    const value = await vscode.window.showInputBox({ ignoreFocusOut: true, ...options });
+    if (value === undefined) throw cancelledSelection();
+    return value.trim();
+  }
+  const urlError = (v: string) =>
+    core.isPackageUrl(v.trim()) ? undefined : 'Enter an https://, ssh:// or git@ repository URL.';
+  async function askRequirement(current?: Record<string, string>) {
+    const chosen = await vscode.window.showQuickPick(
+      Object.entries(core.requirementKinds)
+        .map(([value, label]) => ({ label, value, description: value === current?.kind ? 'current' : undefined }))
+        .sort((a, b) => Number(b.value === current?.kind) - Number(a.value === current?.kind)),
+      { placeHolder: 'Dependency rule' },
+    );
+    if (!chosen) throw cancelledSelection();
+    const kind = chosen.value;
+    if (kind === 'versionRange') {
+      const versionError = (v: string) => (core.isVersion(v.trim()) ? undefined : 'Enter a version like 1.2.3.');
+      const minimum = await ask({
+        prompt: 'Minimum version (inclusive)',
+        value: current?.minimumVersion,
+        validateInput: versionError,
+      });
+      const maximum = await ask({
+        prompt: 'Maximum version (exclusive)',
+        value: current?.maximumVersion,
+        validateInput: versionError,
+      });
+      return core.packageRequirement(kind, minimum, maximum);
+    }
+    const field = { exactVersion: 'version', branch: 'branch', revision: 'revision' }[kind] || 'minimumVersion';
+    const value = await ask({
+      prompt: chosen.label,
+      value: current?.[field] ?? (kind === 'branch' ? 'main' : ''),
+      validateInput: (v) => {
+        try {
+          core.packageRequirement(kind, v);
+        } catch (error) {
+          return error.message;
+        }
+      },
+    });
+    return core.packageRequirement(kind, value);
+  }
+  async function addPackageDependency() {
+    const pbx = await readPbx(packagesFile);
+    const existing = core.packageDependencies(pbx);
+    const url = await ask({
+      prompt: 'Package repository URL (HTTPS or SSH)',
+      placeHolder: 'git@github.com:owner/repo.git',
+      validateInput: (v) =>
+        urlError(v) || (existing.some((p) => p.url === v.trim()) ? 'This package is already added.' : undefined),
+    });
+    const requirement = await askRequirement();
+    const products = (
+      await ask({
+        prompt: 'Products to link (comma-separated)',
+        value: core.packageName(url),
+        validateInput: (v) =>
+          v.split(',').every((p) => core.isProductName(p.trim()))
+            ? undefined
+            : 'Enter product names separated by commas.',
+      })
+    )
+      .split(',')
+      .map((p) => p.trim());
+    const targets = await vscode.window.showQuickPick(
+      core.nativeTargets(pbx).map((t) => ({ label: t.name, id: t.id })),
+      { canPickMany: true, placeHolder: 'Link the products to these targets' },
+    );
+    if (!targets?.length) throw cancelledSelection();
+    await editPbx((text, current) =>
+      core.addPackage(
+        text,
+        current,
+        url,
+        requirement,
+        [...new Set(products)],
+        targets.map((t) => t.id),
+        () => crypto.randomBytes(12).toString('hex'),
+      ),
+    );
+  }
+  async function editPackageDependency(dependency: core.PackageDependency) {
+    const url = await ask({ prompt: 'Package repository URL', value: dependency.url, validateInput: urlError });
+    const requirement = await askRequirement(dependency.requirement);
+    await editPbx((text) => core.updatePackage(text, dependency.id, url, requirement));
+  }
+  async function deletePackageDependency(dependency: core.PackageDependency) {
+    const count = dependency.products.length;
+    const choice = await vscode.window.showWarningMessage(
+      `Remove ${dependency.name}${count ? ` and unlink its ${count} product${count === 1 ? '' : 's'}` : ''}?`,
+      { modal: true },
+      'Remove',
+    );
+    if (choice === 'Remove') await editPbx((text, pbx) => core.removePackage(text, pbx, dependency.id));
+  }
+  async function handlePackageMessage(message) {
+    if (!packageActions.has(message?.action)) return;
+    try {
+      if (message.action === 'resolve') return void (await vscode.commands.executeCommand('VXCode.resolvePackages'));
+      if (busy && message.action !== 'refresh')
+        return void vscode.window.showWarningMessage('VXCode is busy. Cancel the current operation first.');
+      if (message.action === 'add') await addPackageDependency();
+      const dependency = core.packageDependencies(await readPbx(packagesFile)).find((p) => p.id === message.id);
+      if (message.action === 'edit' && dependency?.url) await editPackageDependency(dependency);
+      if (message.action === 'delete' && dependency) await deletePackageDependency(dependency);
+    } catch (error) {
+      if (error.message !== 'Selection cancelled.') vscode.window.showErrorMessage(error.message || String(error));
+    }
+    await renderPackages().catch((error) => vscode.window.showErrorMessage(error.message || String(error)));
+  }
+  register('packages', showPackages);
+  register('resolvePackages', async () => {
+    if (!project) await selectProject();
+    output.show(true);
+    await exec(
+      '/usr/bin/xcodebuild',
+      [...core.projectArgs(project), ...core.scmArgs, '-resolvePackageDependencies'],
+      path.dirname(project),
+    );
+  });
   register('selectProject', selectProject);
   register('selectScheme', selectScheme);
   register('selectSimulator', selectSimulator);

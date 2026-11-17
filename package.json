@@ -2,7 +2,7 @@
   "name": "vxcode",
   "displayName": "VXCode",
   "description": "Build and run iOS Simulator apps with Xcode tools on macOS.",
-  "version": "1.0.5",
+  "version": "1.0.6",
   "publisher": "MichaelHenry19",
   "license": "MIT",
   "engines": {
@@ -81,6 +81,14 @@
       {
         "command": "VXCode.toggleDebugger",
         "title": "VXCode: Toggle Debugger on Run"
+      },
+      {
+        "command": "VXCode.packages",
+        "title": "VXCode: Manage Package Dependencies"
+      },
+      {
+        "command": "VXCode.resolvePackages",
+        "title": "VXCode: Resolve Package Dependencies"
       }
     ],
     "configuration": {

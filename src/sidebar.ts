@@ -13,6 +13,7 @@ const allowed = new Set([
   'cancel',
   'showOutput',
   'toggleDebugger',
+  'packages',
 ]);
 export class Sidebar {
   private view: any;
@@ -42,7 +43,7 @@ export class Sidebar {
     <button class="selector" data-action="selectProject"><span class="label">PROJECT / WORKSPACE <span class="chevron">›</span></span><span class="value" id="project">Choose a project…</span></button>
     <button class="selector" data-action="selectScheme"><span class="label">SCHEME <span class="chevron">›</span></span><span class="value" id="scheme">Choose a scheme…</span></button>
     <button class="selector" data-action="selectSimulator"><span class="label">SIMULATOR <span class="chevron">›</span></span><span class="value" id="device">Choose a simulator…</span></button>
-    <div class="hint" id="configuration"></div><button class="selector" data-action="toggleDebugger" id="debug" role="switch" aria-checked="false"><span class="label">DEBUGGER</span><span class="value" id="debugText">Off</span></button><div class="actions"><button class="primary" data-action="run">▶ &nbsp; Build &amp; Run</button><button class="secondary" data-action="build">Build only</button><button class="secondary" data-action="test">Run tests</button><button class="secondary" data-action="clean">Clean build folder</button><button class="secondary" data-action="archive">Archive for device</button><button class="secondary" data-action="cancel" id="cancel" hidden>Cancel operation</button></div>
+    <div class="hint" id="configuration"></div><button class="selector" data-action="toggleDebugger" id="debug" role="switch" aria-checked="false"><span class="label">DEBUGGER</span><span class="value" id="debugText">Off</span></button><div class="actions"><button class="primary" data-action="run">▶ &nbsp; Build &amp; Run</button><button class="secondary" data-action="build">Build only</button><button class="secondary" data-action="test">Run tests</button><button class="secondary" data-action="clean">Clean build folder</button><button class="secondary" data-action="archive">Archive for device</button><button class="secondary" data-action="packages">Package dependencies</button><button class="secondary" data-action="cancel" id="cancel" hidden>Cancel operation</button></div>
     <div id="error" role="alert"></div><div class="footer"><button class="text" data-action="showOutput">Open build output ↗</button><p class="hint">Uses Xcode tools on this Mac.<br>Apps open in Apple's Simulator.</p></div>
     <script nonce="${nonce}">
     const vscode=acquireVsCodeApi();

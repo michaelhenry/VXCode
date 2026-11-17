@@ -43,6 +43,7 @@ receiver({ action: 'test' });
 receiver({ action: 'toggleDebugger' });
 receiver({ action: 'clean' });
 receiver({ action: 'archive' });
+receiver({ action: 'packages' });
 receiver({ action: 'arbitraryCommand' });
 receiver(null);
 assert.deepStrictEqual(commands, [
@@ -51,6 +52,7 @@ assert.deepStrictEqual(commands, [
   'VXCode.toggleDebugger',
   'VXCode.clean',
   'VXCode.archive',
+  'VXCode.packages',
 ]);
 const scriptMatch = view.webview.html.match(/<script nonce="[^"]+">([\s\S]*?)<\/script>/);
 if (!scriptMatch) throw new Error('Sidebar HTML must contain its webview script.');
