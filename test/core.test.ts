@@ -7,9 +7,11 @@ assert.deepStrictEqual(core.projectArgs('/tmp/App.xcodeproj'), ['-project', '/tm
 const args = core.buildArgs('/tmp/My App.xcodeproj', 'App Tests', 'UUID', 'Debug', '/tmp/Build Data');
 assert(args.includes('platform=iOS Simulator,id=UUID'));
 assert(args.includes('/tmp/My App.xcodeproj'));
+assert.strictEqual(args[args.indexOf('-scmProvider') + 1], 'system');
 const archive = core.archiveArgs('/tmp/App.xcworkspace', 'App', '/tmp/Data', '/tmp/App.xcarchive');
 assert(archive.includes('generic/platform=iOS'));
 assert(!archive.includes('-configuration'));
+assert.strictEqual(archive[archive.indexOf('-scmProvider') + 1], 'system');
 assert.strictEqual(archive[archive.indexOf('-archivePath') + 1], '/tmp/App.xcarchive');
 assert.deepStrictEqual(core.schemes({ workspace: { schemes: ['Z', 'A', 'A'] } }), ['A', 'Z']);
 assert.deepStrictEqual(core.schemes({ project: { schemes: ['App'] } }), ['App']);

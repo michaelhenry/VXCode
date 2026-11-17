@@ -35,6 +35,7 @@ export function launchedPid(output: string): number | undefined {
 export function projectArgs(project: string): string[] {
   return [project.endsWith('.xcworkspace') ? '-workspace' : '-project', project];
 }
+export const scmArgs = ['-scmProvider', 'system'];
 export function buildArgs(
   project: string,
   scheme: string,
@@ -44,6 +45,7 @@ export function buildArgs(
 ): string[] {
   return [
     ...projectArgs(project),
+    ...scmArgs,
     '-scheme',
     scheme,
     '-configuration',
@@ -58,6 +60,7 @@ export function buildArgs(
 export function archiveArgs(project: string, scheme: string, derivedData: string, archivePath: string): string[] {
   return [
     ...projectArgs(project),
+    ...scmArgs,
     '-scheme',
     scheme,
     '-destination',

@@ -10,9 +10,11 @@ import { Sidebar } from './sidebar';
 export function activate(context: vscode.ExtensionContext): void {
   const output = vscode.window.createOutputChannel('VXCode');
   const diagnostics = vscode.languages.createDiagnosticCollection('VXCode');
-  let project,
-    scheme,
-    device,
+  const saved = context.workspaceState.get<any>('VXCode.selection', {});
+  const restored = !!saved.project && fs.existsSync(saved.project);
+  let project = restored ? saved.project : undefined,
+    scheme = restored ? saved.scheme : undefined,
+    device = saved.device,
     activeChild,
     busy = false,
     cancelled = false;
@@ -33,6 +35,7 @@ export function activate(context: vscode.ExtensionContext): void {
     vscode.workspace.onDidChangeConfiguration(() => sidebar.refresh()),
   );
   const config = () => vscode.workspace.getConfiguration('VXCode');
+  const remember = () => context.workspaceState.update('VXCode.selection', { project, scheme, device });
   const checkCancelled = () => {
     if (cancelled) throw new Error('Operation cancelled.');
   };
@@ -115,7 +118,8 @@ export function activate(context: vscode.ExtensionContext): void {
     });
   }
   const json = async (command: string, args: string[], cwd?: string) => JSON.parse(await exec(command, args, cwd));
-  const appCache = new Map<string, core.Application[]>();
+  const appCache = new Map<string, core.Application[]>(Object.entries(context.workspaceState.get('VXCode.apps', {})));
+  const saveApps = () => context.workspaceState.update('VXCode.apps', Object.fromEntries(appCache));
   const packageFlags = new Map<string, Promise<string[]>>();
   // Older Xcode rejects unknown flags, so probe once per developer directory.
   function packageArgs(): Promise<string[]> {
@@ -149,17 +153,23 @@ export function activate(context: vscode.ExtensionContext): void {
     if (!chosen) throw new Error('Selection cancelled.');
     project = chosen.value;
     scheme = undefined;
+    remember();
     sidebar.refresh();
   }
   async function selectScheme() {
     if (!project) await selectProject();
     const choices = core.schemes(
-      await json('/usr/bin/xcodebuild', [...core.projectArgs(project), '-list', '-json'], path.dirname(project)),
+      await json(
+        '/usr/bin/xcodebuild',
+        [...core.projectArgs(project), ...core.scmArgs, '-list', '-json'],
+        path.dirname(project),
+      ),
     );
     if (!choices.length) throw new Error('No schemes found. Create a shared scheme in Xcode.');
     const chosen = await vscode.window.showQuickPick(choices, { placeHolder: 'Select scheme' });
     if (!chosen) throw new Error('Selection cancelled.');
     scheme = chosen;
+    remember();
     sidebar.refresh();
   }
   async function selectSimulator() {
@@ -177,6 +187,7 @@ export function activate(context: vscode.ExtensionContext): void {
     );
     if (!chosen) throw new Error('Selection cancelled.');
     device = chosen.value;
+    remember();
     sidebar.refresh();
   }
   async function derivedDataPath() {
@@ -227,6 +238,7 @@ export function activate(context: vscode.ExtensionContext): void {
     if (action === 'clean') {
       await exec('/usr/bin/xcodebuild', [...args, 'clean'], cwd, true);
       appCache.clear();
+      saveApps();
       vscode.window.showInformationMessage('Xcode clean succeeded.');
       return;
     }
@@ -245,6 +257,7 @@ export function activate(context: vscode.ExtensionContext): void {
     if (!apps.length) {
       apps = core.applications(await json('/usr/bin/xcodebuild', [...args, '-showBuildSettings', '-json'], cwd));
       appCache.set(key, apps);
+      saveApps();
     }
     if (!apps.length) throw new Error('Scheme produced no runnable iOS Simulator app. Select an application scheme.');
     const app =
@@ -265,6 +278,7 @@ export function activate(context: vscode.ExtensionContext): void {
       .find((d) => d.udid === device.udid);
     if (!current) {
       device = undefined;
+      remember();
       throw new Error('Selected simulator is no longer available. Select another simulator.');
     }
     if (current.state !== 'Booted') await exec('/usr/bin/xcrun', ['simctl', 'boot', device.udid], cwd);
