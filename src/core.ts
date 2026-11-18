@@ -386,6 +386,18 @@ export const buildOptimizations: BuildOptimization[] = [
     args: [['-parallel-testing-enabled', 'YES']],
     testOnly: true,
   },
+  {
+    id: 'noIndexStore',
+    label: 'Skip indexing while building',
+    detail: 'Sets COMPILER_INDEX_STORE_ENABLE=NO. Xcode re-indexes when it next opens the project.',
+    args: [['COMPILER_INDEX_STORE_ENABLE=NO']],
+  },
+  {
+    id: 'timingSummary',
+    label: 'Build timing summary',
+    detail: 'Prints the slowest build steps at the end of the build output.',
+    args: [['-showBuildTimingSummary']],
+  },
 ];
 export function optimizationArgs(
   selected: readonly string[] | undefined,
@@ -406,6 +418,34 @@ export function parseList(text: string): string[] {
         .filter(Boolean),
     ),
   ];
+}
+export const hasTestPattern = (tests: readonly string[] | undefined) => (tests || []).some((t) => t.includes('*'));
+export function testClasses(source: string): string[] {
+  return [...String(source).matchAll(/\bclass\s+([A-Za-z_]\w*)\s*:/g)].map(([, name]) => name);
+}
+const escapeRegExp = (v: string) => v.replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
+export function expandTestPatterns(tests: readonly string[] | undefined, classes: readonly string[]): string[] {
+  const known = [...new Set(classes)].sort();
+  return [
+    ...new Set(
+      (tests || []).flatMap((entry) => {
+        if (!entry.includes('*')) return [entry];
+        const slash = entry.indexOf('/');
+        if (slash < 0) return [];
+        const [target, pattern] = [entry.slice(0, slash), entry.slice(slash + 1)];
+        if (!target || target.includes('*') || pattern.includes('/')) return [];
+        const regex = new RegExp(`^${pattern.split('*').map(escapeRegExp).join('\\w*')}$`);
+        return known.filter((name) => regex.test(name)).map((name) => `${target}/${name}`);
+      }),
+    ),
+  ];
+}
+export const skipTestingArgs = (tests: readonly string[] | undefined) => (tests || []).map((t) => `-skip-testing:${t}`);
+export function workspaceExcludeGlob(folder: string, workspaceFolder: string | undefined): string | undefined {
+  if (!workspaceFolder) return undefined;
+  const relative = path.relative(workspaceFolder, folder);
+  if (!relative || relative.startsWith('..') || path.isAbsolute(relative)) return undefined;
+  return relative.split(path.sep).join('/');
 }
 export function parseArguments(text: string): string[] {
   return String(text ?? '')

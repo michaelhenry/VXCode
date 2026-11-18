@@ -48,6 +48,7 @@ receiver({ action: 'selectDerivedData' });
 receiver({ action: 'selectConfiguration' });
 receiver({ action: 'buildOptions' });
 receiver({ action: 'testWithoutBuilding' });
+receiver({ action: 'launch' });
 receiver({ action: 'arbitraryCommand' });
 receiver(null);
 assert.deepStrictEqual(commands, [
@@ -61,6 +62,7 @@ assert.deepStrictEqual(commands, [
   'VXCode.selectConfiguration',
   'VXCode.buildOptions',
   'VXCode.testWithoutBuilding',
+  'VXCode.launch',
 ]);
 const scriptMatch = view.webview.html.match(/<script nonce="[^"]+">([\s\S]*?)<\/script>/);
 if (!scriptMatch) throw new Error('Sidebar HTML must contain its webview script.');

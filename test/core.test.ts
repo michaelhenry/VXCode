@@ -193,8 +193,42 @@ assert.strictEqual(
     core.buildOptimizations.map((o) => o.id),
     true,
   ).length,
-  11,
+  13,
 );
+assert.deepStrictEqual(core.optimizationArgs(['noIndexStore', 'timingSummary'], false), [
+  'COMPILER_INDEX_STORE_ENABLE=NO',
+  '-showBuildTimingSummary',
+]);
+assert.deepStrictEqual(
+  core.optimizationArgs(['timingSummary'], false, () => false),
+  [],
+);
+assert.deepStrictEqual(
+  core.testClasses('import XCTest\nfinal class LoginSnapshotTests: XCTestCase {}\nclass Helper : NSObject {}\n'),
+  ['LoginSnapshotTests', 'Helper'],
+);
+assert(core.hasTestPattern(['A/B', 'A/*Tests']));
+assert(!core.hasTestPattern(['A/B']));
+assert(!core.hasTestPattern(undefined));
+const classes = ['LoginSnapshotTests', 'HomeSnapshotTests', 'LoginTests', 'LoginSnapshotTests'];
+assert.deepStrictEqual(core.expandTestPatterns(['AppTests/*SnapshotTests', 'AppTests/LoginTests'], classes), [
+  'AppTests/HomeSnapshotTests',
+  'AppTests/LoginSnapshotTests',
+  'AppTests/LoginTests',
+]);
+assert.deepStrictEqual(core.expandTestPatterns(['AppTests/Login*'], classes), [
+  'AppTests/LoginSnapshotTests',
+  'AppTests/LoginTests',
+]);
+assert.deepStrictEqual(core.expandTestPatterns(['AppTests/Nope*', '*/LoginTests', 'Login*'], classes), []);
+assert.deepStrictEqual(core.expandTestPatterns(['AppTests/a.b*'], ['aXbTests', 'a.bTests']), ['AppTests/a.bTests']);
+assert.deepStrictEqual(core.expandTestPatterns(undefined, classes), []);
+assert.deepStrictEqual(core.skipTestingArgs(['AppTests/A']), ['-skip-testing:AppTests/A']);
+assert.strictEqual(core.workspaceExcludeGlob('/ws/DerivedData', '/ws'), 'DerivedData');
+assert.strictEqual(core.workspaceExcludeGlob('/ws/.build/DD', '/ws'), '.build/DD');
+assert.strictEqual(core.workspaceExcludeGlob('/ws', '/ws'), undefined);
+assert.strictEqual(core.workspaceExcludeGlob('/other/DD', '/ws'), undefined);
+assert.strictEqual(core.workspaceExcludeGlob('/ws/DD', undefined), undefined);
 assert.deepStrictEqual(core.parseList(' AppTests/A \n\nAppTests/B, AppTests/A\n'), ['AppTests/A', 'AppTests/B']);
 assert.deepStrictEqual(core.parseList(''), []);
 assert.deepStrictEqual(core.parseArguments('-jobs\n 8 \n\nOTHER_SWIFT_FLAGS=-D A B\n'), [
@@ -212,9 +246,25 @@ assert.strictEqual(core.buildOptionsSummary(3, 0, 1), '3 speedups · 1 extra arg
   const html = buildOptionsHtml('n', {
     optimizations: ['dwarf'],
     onlyTesting: ['<img src=x>'],
+    skipTesting: ['AppTests/*<b>'],
     additionalArguments: ['</textarea><script>'],
+    excludeDerivedData: true,
+    derivedDataGlob: 'Derived<Data>',
     preview: ['DEBUG_INFORMATION_FORMAT=dwarf'],
   });
+  assert(html.includes('id="excludeDerivedData" checked'));
+  assert(html.includes('Derived&lt;Data&gt;') && !html.includes('Derived<Data>'));
+  assert(html.includes('AppTests/*&lt;b&gt;'));
+  assert(html.includes('data-id="timingSummary"') && html.includes('data-id="noIndexStore"'));
+  const outside = buildOptionsHtml('n', {
+    optimizations: [],
+    onlyTesting: [],
+    skipTesting: [],
+    additionalArguments: [],
+    excludeDerivedData: false,
+    preview: [],
+  });
+  assert(!outside.includes('id="excludeDerivedData" checked') && outside.includes('outside it'));
   assert(html.includes('data-id="dwarf" checked'));
   assert(!html.includes('data-id="noCodeCoverage" checked'));
   assert(!html.includes('<img src=x>') && html.includes('&lt;img src=x&gt;'));

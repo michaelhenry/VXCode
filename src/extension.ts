@@ -37,7 +37,7 @@ export function activate(context: vscode.ExtensionContext): void {
     debug: !!config().get('attachDebugger'),
     buildOptions: core.buildOptionsSummary(
       validOptimizations().length,
-      listSetting('onlyTesting').length,
+      listSetting('onlyTesting').length + listSetting('skipTesting').length,
       listSetting('additionalBuildArguments').length,
     ),
   }));
@@ -323,8 +323,56 @@ export function activate(context: vscode.ExtensionContext): void {
   async function derivedDataPath() {
     const derived = derivedDataLocation();
     await vscode.workspace.fs.createDirectory(vscode.Uri.file(derived));
+    await updateDerivedDataExclusion(derived, config().get<boolean>('excludeDerivedData') !== false).catch((error) =>
+      output.appendLine(`Could not update VS Code exclusions for DerivedData: ${error.message || error}`),
+    );
     return derived;
   }
+  function derivedDataExclusion(derived: string) {
+    const folder = vscode.workspace.getWorkspaceFolder(vscode.Uri.file(derived));
+    const glob = core.workspaceExcludeGlob(derived, folder?.uri.fsPath);
+    return folder && glob ? { folder, glob } : undefined;
+  }
+  async function updateDerivedDataExclusion(derived: string, exclude: boolean) {
+    const target = derivedDataExclusion(derived);
+    if (!target) return;
+    const settings = vscode.workspace.getConfiguration(undefined, target.folder.uri);
+    for (const [key, pattern] of [
+      ['files.watcherExclude', `${target.glob}/**`],
+      ['search.exclude', target.glob],
+    ]) {
+      const current = { ...(settings.inspect<Record<string, boolean>>(key)?.workspaceFolderValue || {}) };
+      if (exclude === (current[pattern] === true)) continue;
+      if (exclude) current[pattern] = true;
+      else delete current[pattern];
+      await settings.update(
+        key,
+        Object.keys(current).length ? current : undefined,
+        vscode.ConfigurationTarget.WorkspaceFolder,
+      );
+    }
+  }
+  async function workspaceTestClasses(): Promise<string[]> {
+    const files = await vscode.workspace.findFiles('**/*.swift', config().get<string>('discoveryExclude'));
+    const classes: string[] = [];
+    for (const file of files) {
+      checkCancelled();
+      const source = await fs.promises.readFile(file.fsPath, 'utf8').catch(() => '');
+      if (source.includes('XCTest')) classes.push(...core.testClasses(source));
+    }
+    return classes;
+  }
+  async function testFilterArgs(): Promise<string[]> {
+    const only = listSetting('onlyTesting');
+    const skip = listSetting('skipTesting');
+    const classes = core.hasTestPattern([...only, ...skip]) ? await workspaceTestClasses() : [];
+    const resolvedOnly = core.expandTestPatterns(only, classes);
+    if (only.length && !resolvedOnly.length)
+      throw new Error(`No test classes match ${only.join(', ')}. Check Tests to run in Build Options.`);
+    return [...core.onlyTestingArgs(resolvedOnly), ...core.skipTestingArgs(core.expandTestPatterns(skip, classes))];
+  }
+  const simulatorAppRunning = () =>
+    new Promise<boolean>((resolve) => execFile('/usr/bin/pgrep', ['-x', 'Simulator'], (error) => resolve(!error)));
   async function selectDerivedData() {
     const current = config().get<string>('derivedDataPath') || '';
     const items = [
@@ -391,7 +439,7 @@ export function activate(context: vscode.ExtensionContext): void {
     const choice = await vscode.window.showInformationMessage(`Archived ${scheme}.`, 'Reveal in Finder');
     if (choice) await vscode.commands.executeCommand('revealFileInOS', vscode.Uri.file(archivePath));
   }
-  async function build(run, test = false, action?: 'clean' | 'withoutBuilding') {
+  async function build(run, test = false, action?: 'clean' | 'withoutBuilding' | 'launchOnly') {
     await prepare();
     const cwd = path.dirname(project);
     const args = [
@@ -412,13 +460,15 @@ export function activate(context: vscode.ExtensionContext): void {
       vscode.window.showInformationMessage('Xcode clean succeeded.');
       return;
     }
-    const testAction = action === 'withoutBuilding' ? 'test-without-building' : 'test';
-    await exec(
-      '/usr/bin/xcodebuild',
-      test ? [...args, ...core.onlyTestingArgs(listSetting('onlyTesting')), testAction] : [...args, 'build'],
-      cwd,
-      true,
-    );
+    if (action !== 'launchOnly') {
+      const testAction = action === 'withoutBuilding' ? 'test-without-building' : 'test';
+      await exec(
+        '/usr/bin/xcodebuild',
+        test ? [...args, ...(await testFilterArgs()), testAction] : [...args, 'build'],
+        cwd,
+        true,
+      );
+    }
     if (test) {
       vscode.window.showInformationMessage('Xcode tests passed.');
       return;
@@ -446,6 +496,7 @@ export function activate(context: vscode.ExtensionContext): void {
             )
           )?.value;
     if (!app) throw new Error('Selection cancelled.');
+    if (!fs.existsSync(app.path)) throw new Error(`${app.name} has not been built yet. Use Build & Run first.`);
     const bundle = (
       await exec('/usr/libexec/PlistBuddy', ['-c', 'Print :CFBundleIdentifier', path.join(app.path, 'Info.plist')], cwd)
     ).trim();
@@ -457,9 +508,13 @@ export function activate(context: vscode.ExtensionContext): void {
       remember();
       throw new Error('Selected simulator is no longer available. Select another simulator.');
     }
-    if (current.state !== 'Booted') await exec('/usr/bin/xcrun', ['simctl', 'boot', device.udid], cwd);
-    await exec('/usr/bin/xcrun', ['simctl', 'bootstatus', device.udid, '-b'], cwd);
-    await exec('/usr/bin/open', ['-a', 'Simulator', '--args', '-CurrentDeviceUDID', device.udid], cwd);
+    const booted = current.state === 'Booted';
+    if (!booted) {
+      await exec('/usr/bin/xcrun', ['simctl', 'boot', device.udid], cwd);
+      await exec('/usr/bin/xcrun', ['simctl', 'bootstatus', device.udid, '-b'], cwd);
+    }
+    if (!booted || !(await simulatorAppRunning()))
+      await exec('/usr/bin/open', ['-a', 'Simulator', '--args', '-CurrentDeviceUDID', device.udid], cwd);
     await exec('/usr/bin/xcrun', ['simctl', 'install', device.udid, app.path], cwd);
     const debug = config().get<boolean>('attachDebugger');
     if (debug && !vscode.extensions.getExtension('swiftlang.swift-vscode'))
@@ -529,6 +584,7 @@ export function activate(context: vscode.ExtensionContext): void {
                     test: 'Tests passed',
                     testWithoutBuilding: 'Tests passed',
                     run: 'App launched',
+                    launch: 'App launched',
                     build: 'Build succeeded',
                     clean: 'Clean succeeded',
                     archive: 'Archive succeeded',
@@ -749,15 +805,27 @@ export function activate(context: vscode.ExtensionContext): void {
     if (!buildOptionsPanel) return;
     const optimizations = validOptimizations();
     const onlyTesting = listSetting('onlyTesting');
+    const skipTesting = listSetting('skipTesting');
     const additionalArguments = listSetting('additionalBuildArguments');
+    let tests: string[];
+    try {
+      tests = await testFilterArgs();
+    } catch (_) {
+      tests = [...core.onlyTestingArgs(onlyTesting), ...core.skipTestingArgs(skipTesting)];
+    }
+    const exclusion = project ? derivedDataExclusion(derivedDataLocation()) : undefined;
+    if (!buildOptionsPanel) return;
     buildOptionsPanel.webview.html = buildOptionsHtml(crypto.randomBytes(24).toString('base64'), {
       optimizations,
       onlyTesting,
+      skipTesting,
       additionalArguments,
+      excludeDerivedData: config().get<boolean>('excludeDerivedData') !== false,
+      derivedDataGlob: exclusion?.glob,
       preview: [
         ...core.optimizationArgs(optimizations, true, supportsFlag(await xcodebuildHelp())),
         ...additionalArguments,
-        ...core.onlyTestingArgs(onlyTesting),
+        ...tests,
       ],
     });
   }
@@ -765,8 +833,17 @@ export function activate(context: vscode.ExtensionContext): void {
     if (!buildOptionActions.has(message?.action)) return;
     const text = typeof message.text === 'string' ? message.text.slice(0, 20000) : '';
     try {
-      if (message.action === 'saveTests')
-        return void (await config().update('onlyTesting', core.parseList(text), settingTarget()));
+      if (message.action === 'saveTests') {
+        const skip = typeof message.skip === 'string' ? message.skip.slice(0, 20000) : '';
+        await config().update('onlyTesting', core.parseList(text), settingTarget());
+        return void (await config().update('skipTesting', core.parseList(skip), settingTarget()));
+      }
+      if (message.action === 'toggleExclude') {
+        const exclude = message.checked === true;
+        await config().update('excludeDerivedData', exclude, settingTarget());
+        if (project) await updateDerivedDataExclusion(derivedDataLocation(), exclude);
+        return;
+      }
       if (message.action === 'saveArguments')
         return void (await config().update('additionalBuildArguments', core.parseArguments(text), settingTarget()));
       let selected = validOptimizations();
@@ -802,6 +879,7 @@ export function activate(context: vscode.ExtensionContext): void {
   register('testWithoutBuilding', () => build(false, true, 'withoutBuilding'));
   register('build', () => build(false));
   register('run', () => build(true));
+  register('launch', () => build(true, false, 'launchOnly'));
   register('clean', () => build(false, false, 'clean'));
   register('archive', archive);
   context.subscriptions.push(

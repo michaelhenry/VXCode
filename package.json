@@ -63,6 +63,10 @@
         "title": "VXCode: Build and Run"
       },
       {
+        "command": "VXCode.launch",
+        "title": "VXCode: Run Without Building"
+      },
+      {
         "command": "VXCode.cancel",
         "title": "VXCode: Cancel Current Operation"
       },
@@ -150,7 +154,9 @@
               "noPreviews",
               "dwarf",
               "compilationCache",
-              "parallelTesting"
+              "parallelTesting",
+              "noIndexStore",
+              "timingSummary"
             ],
             "enumDescriptions": [
               "Pass -enableCodeCoverage NO when running tests.",
@@ -159,7 +165,9 @@
               "Set ENABLE_PREVIEWS=NO and ENABLE_DEBUG_DYLIB=NO.",
               "Set DEBUG_INFORMATION_FORMAT=dwarf.",
               "Set COMPILATION_CACHE_ENABLE_CACHING=YES.",
-              "Pass -parallel-testing-enabled YES when running tests."
+              "Pass -parallel-testing-enabled YES when running tests.",
+              "Set COMPILER_INDEX_STORE_ENABLE=NO.",
+              "Pass -showBuildTimingSummary."
             ]
           },
           "markdownDescription": "Speedups applied to Build, Build and Run, Run tests and Clean (not Archive). Edit them in **VXCode: Build Options**."
@@ -171,7 +179,16 @@
           "items": {
             "type": "string"
           },
-          "markdownDescription": "Tests to run, each passed as `-only-testing:<value>` (`Target`, `Target/Class` or `Target/Class/testMethod`). Empty runs the whole scheme."
+          "markdownDescription": "Tests to run, each passed as `-only-testing:<value>` (`Target`, `Target/Class` or `Target/Class/testMethod`). A `*` in the class name, such as `AppTests/*SnapshotTests`, matches test classes found in the workspace. Empty runs the whole scheme."
+        },
+        "VXCode.skipTesting": {
+          "type": "array",
+          "default": [],
+          "scope": "resource",
+          "items": {
+            "type": "string"
+          },
+          "markdownDescription": "Tests to skip, each passed as `-skip-testing:<value>`. Supports the same `*` class-name patterns as `VXCode.onlyTesting`."
         },
         "VXCode.additionalBuildArguments": {
           "type": "array",
@@ -181,6 +198,12 @@
             "type": "string"
           },
           "markdownDescription": "Extra `xcodebuild` arguments appended to Build, Build and Run, Run tests and Clean, one array item per argument."
+        },
+        "VXCode.excludeDerivedData": {
+          "type": "boolean",
+          "default": true,
+          "scope": "resource",
+          "markdownDescription": "When DerivedData is inside the workspace folder, add it to `files.watcherExclude` and `search.exclude` in that folder's settings so VS Code does not track build output."
         }
       }
     },

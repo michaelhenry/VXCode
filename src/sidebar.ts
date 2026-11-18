@@ -18,6 +18,7 @@ const allowed = new Set([
   'packages',
   'buildOptions',
   'testWithoutBuilding',
+  'launch',
 ]);
 export class Sidebar {
   private view: any;
@@ -50,7 +51,7 @@ export class Sidebar {
     <button class="selector" data-action="selectDerivedData"><span class="label">DERIVED DATA <span class="chevron">›</span></span><span class="value" id="derivedData">Default</span></button>
     <button class="selector" data-action="selectConfiguration"><span class="label">CONFIGURATION <span class="chevron">›</span></span><span class="value" id="configuration">Debug</span></button>
     <button class="selector" data-action="buildOptions"><span class="label">BUILD OPTIONS <span class="chevron">›</span></span><span class="value" id="buildOptions">Default</span></button>
-    <button class="selector" data-action="toggleDebugger" id="debug" role="switch" aria-checked="false"><span class="label">DEBUGGER</span><span class="value" id="debugText">Off</span></button><div class="actions"><button class="primary" data-action="run">▶ &nbsp; Build &amp; Run</button><button class="secondary" data-action="build">Build only</button><button class="secondary" data-action="test">Run tests</button><button class="secondary" data-action="testWithoutBuilding">Re-run tests (skip build)</button><button class="secondary" data-action="clean">Clean build folder</button><button class="secondary" data-action="archive">Archive for device</button><button class="secondary" data-action="packages">Package dependencies</button><button class="secondary" data-action="cancel" id="cancel" hidden>Cancel operation</button></div>
+    <button class="selector" data-action="toggleDebugger" id="debug" role="switch" aria-checked="false"><span class="label">DEBUGGER</span><span class="value" id="debugText">Off</span></button><div class="actions"><button class="primary" data-action="run">▶ &nbsp; Build &amp; Run</button><button class="secondary" data-action="launch">Run without building</button><button class="secondary" data-action="build">Build only</button><button class="secondary" data-action="test">Run tests</button><button class="secondary" data-action="testWithoutBuilding">Re-run tests (skip build)</button><button class="secondary" data-action="clean">Clean build folder</button><button class="secondary" data-action="archive">Archive for device</button><button class="secondary" data-action="packages">Package dependencies</button><button class="secondary" data-action="cancel" id="cancel" hidden>Cancel operation</button></div>
     <div id="error" role="alert"></div><div class="footer"><button class="text" data-action="showOutput">Open build output ↗</button><p class="hint">Uses Xcode tools on this Mac.<br>Apps open in Apple's Simulator.</p></div>
     <script nonce="${nonce}">
     const vscode=acquireVsCodeApi();
