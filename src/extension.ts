@@ -7,9 +7,12 @@ import * as crypto from 'crypto';
 import * as core from './core';
 import { Sidebar } from './sidebar';
 import { packageActions, packagesHtml } from './packages';
+import { buildOptionActions, buildOptionsHtml } from './buildOptions';
 
 export function activate(context: vscode.ExtensionContext): void {
-  const output = vscode.window.createOutputChannel('VXCode');
+  // The language id gives the channel the colors from syntaxes/vxcode-output.tmLanguage.json.
+  const output = vscode.window.createOutputChannel('VXCode', 'vxcode-output');
+  const log = (line: string) => output.appendLine(`[${core.timestamp(new Date())}] ${line}`);
   const diagnostics = vscode.languages.createDiagnosticCollection('VXCode');
   const saved = context.workspaceState.get<any>('VXCode.selection', {});
   const restored = !!saved.project && fs.existsSync(saved.project);
@@ -32,12 +35,30 @@ export function activate(context: vscode.ExtensionContext): void {
     derivedData: config().get<string>('derivedDataPath') || '',
     derivedDataDetail: project ? derivedDataLocation() : '',
     debug: !!config().get('attachDebugger'),
+    buildOptions: core.buildOptionsSummary(
+      validOptimizations().length,
+      listSetting('onlyTesting').length,
+      listSetting('additionalBuildArguments').length,
+    ),
   }));
   context.subscriptions.push(
     vscode.window.registerWebviewViewProvider('VXCode.launch', sidebar),
-    vscode.workspace.onDidChangeConfiguration(() => sidebar.refresh()),
+    vscode.workspace.onDidChangeConfiguration((event) => {
+      sidebar.refresh();
+      if (event.affectsConfiguration('VXCode')) void renderBuildOptions();
+    }),
   );
   const config = () => vscode.workspace.getConfiguration('VXCode');
+  const settingTarget = () =>
+    vscode.workspace.workspaceFolders?.length
+      ? vscode.ConfigurationTarget.Workspace
+      : vscode.ConfigurationTarget.Global;
+  const listSetting = (key: string): string[] => {
+    const value = config().get<unknown>(key);
+    return Array.isArray(value) ? value.filter((v): v is string => typeof v === 'string' && !!v.trim()) : [];
+  };
+  const optimizationIds = new Set(core.buildOptimizations.map((o) => o.id));
+  const validOptimizations = () => listSetting('buildOptimizations').filter((id) => optimizationIds.has(id));
   const remember = () => context.workspaceState.update('VXCode.selection', { project, scheme, device });
   const checkCancelled = () => {
     if (cancelled) throw new Error('Operation cancelled.');
@@ -68,7 +89,10 @@ export function activate(context: vscode.ExtensionContext): void {
     checkCancelled();
     status = command.endsWith('xcodebuild') ? 'Building / reading Xcode project…' : 'Preparing Simulator…';
     sidebar.refresh();
-    output.appendLine(`\n> ${command} ${args.map((a) => JSON.stringify(a)).join(' ')}`);
+    output.appendLine('');
+    log(`> ${command} ${args.map((a) => JSON.stringify(a)).join(' ')}`);
+    const started = Date.now();
+    const finish = (message: string) => log(`${message} (${core.duration(Date.now() - started)})`);
     return new Promise<string>((resolve, reject) => {
       const env = { ...process.env };
       const developerDirectory = config().get<string>('developerDirectory');
@@ -97,50 +121,74 @@ export function activate(context: vscode.ExtensionContext): void {
         diagnostics.set(uri, [...(diagnostics.get(uri) || []), item]);
       };
       const receive = (kind, chunk) => {
-        output.append(chunk);
         if (kind === 'out') stdout += chunk;
         else stderr = (stderr + chunk).slice(-16000);
         const lines = (pending[kind] + chunk).split(/\r?\n/);
         pending[kind] = lines.pop() || '';
-        lines.forEach(report);
+        lines.forEach(emit);
+      };
+      const emit = (line: string) => {
+        log(line);
+        report(line);
+      };
+      const flush = () => {
+        for (const kind of ['out', 'err']) if (pending[kind]) emit(pending[kind]);
+        pending.out = pending.err = '';
       };
       child.stdout.setEncoding('utf8');
       child.stderr.setEncoding('utf8');
       child.stdout.on('data', (chunk) => receive('out', chunk));
       child.stderr.on('data', (chunk) => receive('err', chunk));
-      child.on('error', reject);
+      child.on('error', (error) => {
+        finish(`✖ Could not start ${path.basename(command)}: ${error.message}`);
+        reject(error);
+      });
       child.on('close', (code) => {
         if (activeChild === child) activeChild = undefined;
-        report(pending.out);
-        report(pending.err);
-        if (cancelled) reject(new Error('Operation cancelled.'));
-        else if (code !== 0)
+        flush();
+        const name = path.basename(command);
+        if (cancelled) {
+          finish(`■ ${name} cancelled`);
+          reject(new Error('Operation cancelled.'));
+        } else if (code !== 0) {
+          finish(`✖ ${name} failed with exit code ${code}`);
           reject(new Error(`${command} exited with code ${code}. See VXCode output.\n${stderr.slice(-1200)}`));
-        else resolve(stdout);
+        } else {
+          finish(`✔ ${name} finished`);
+          resolve(stdout);
+        }
       });
     });
   }
   const json = async (command: string, args: string[], cwd?: string) => JSON.parse(await exec(command, args, cwd));
   const appCache = new Map<string, core.Application[]>(Object.entries(context.workspaceState.get('VXCode.apps', {})));
   const saveApps = () => context.workspaceState.update('VXCode.apps', Object.fromEntries(appCache));
-  const packageFlags = new Map<string, Promise<string[]>>();
+  const helpTexts = new Map<string, Promise<string>>();
   // Older Xcode rejects unknown flags, so probe once per developer directory.
-  function packageArgs(): Promise<string[]> {
+  function xcodebuildHelp(): Promise<string> {
     const dir = config().get<string>('developerDirectory') || '';
-    if (!packageFlags.has(dir))
-      packageFlags.set(
+    if (!helpTexts.has(dir))
+      helpTexts.set(
         dir,
         new Promise((resolve) =>
           execFile(
             '/usr/bin/xcodebuild',
             ['-help'],
             { env: dir ? { ...process.env, DEVELOPER_DIR: dir } : process.env },
-            (_error, stdout, stderr) =>
-              resolve(/-skipPackageUpdates\b/.test(stdout + stderr) ? ['-skipPackageUpdates'] : []),
+            (_error, stdout, stderr) => resolve(stdout + stderr),
           ),
         ),
       );
-    return packageFlags.get(dir)!;
+    return helpTexts.get(dir)!;
+  }
+  const supportsFlag = (help: string) => (flag: string) =>
+    new RegExp(`(^|\\s)${flag.replace(/[.*+?^${}()|[\]\\]/g, '\\$&')}\\b`).test(help);
+  async function packageArgs(): Promise<string[]> {
+    return supportsFlag(await xcodebuildHelp())('-skipPackageUpdates') ? ['-skipPackageUpdates'] : [];
+  }
+  async function buildOptionArgs(testing: boolean): Promise<string[]> {
+    const optimizations = core.optimizationArgs(validOptimizations(), testing, supportsFlag(await xcodebuildHelp()));
+    return [...optimizations, ...listSetting('additionalBuildArguments')];
   }
   async function selectProject() {
     const files = await vscode.workspace.findFiles(
@@ -238,10 +286,7 @@ export function activate(context: vscode.ExtensionContext): void {
         refresh = true;
         continue;
       }
-      const target = vscode.workspace.workspaceFolders?.length
-        ? vscode.ConfigurationTarget.Workspace
-        : vscode.ConfigurationTarget.Global;
-      await config().update('configuration', picked.value, target);
+      await config().update('configuration', picked.value, settingTarget());
       sidebar.refresh();
       return;
     }
@@ -318,10 +363,7 @@ export function activate(context: vscode.ExtensionContext): void {
       if (entered === undefined) return;
       value = entered.trim();
     }
-    const target = vscode.workspace.workspaceFolders?.length
-      ? vscode.ConfigurationTarget.Workspace
-      : vscode.ConfigurationTarget.Global;
-    await config().update('derivedDataPath', value || undefined, target);
+    await config().update('derivedDataPath', value || undefined, settingTarget());
   }
   async function prepare(needsDevice = true) {
     if (!project) await selectProject();
@@ -349,7 +391,7 @@ export function activate(context: vscode.ExtensionContext): void {
     const choice = await vscode.window.showInformationMessage(`Archived ${scheme}.`, 'Reveal in Finder');
     if (choice) await vscode.commands.executeCommand('revealFileInOS', vscode.Uri.file(archivePath));
   }
-  async function build(run, test = false, action?: 'clean') {
+  async function build(run, test = false, action?: 'clean' | 'withoutBuilding') {
     await prepare();
     const cwd = path.dirname(project);
     const args = [
@@ -361,6 +403,7 @@ export function activate(context: vscode.ExtensionContext): void {
         await derivedDataPath(),
       ),
       ...(await packageArgs()),
+      ...(await buildOptionArgs(test)),
     ];
     if (action === 'clean') {
       await exec('/usr/bin/xcodebuild', [...args, 'clean'], cwd, true);
@@ -369,7 +412,13 @@ export function activate(context: vscode.ExtensionContext): void {
       vscode.window.showInformationMessage('Xcode clean succeeded.');
       return;
     }
-    await exec('/usr/bin/xcodebuild', [...args, test ? 'test' : 'build'], cwd, true);
+    const testAction = action === 'withoutBuilding' ? 'test-without-building' : 'test';
+    await exec(
+      '/usr/bin/xcodebuild',
+      test ? [...args, ...core.onlyTestingArgs(listSetting('onlyTesting')), testAction] : [...args, 'build'],
+      cwd,
+      true,
+    );
     if (test) {
       vscode.window.showInformationMessage('Xcode tests passed.');
       return;
@@ -461,6 +510,13 @@ export function activate(context: vscode.ExtensionContext): void {
         lastError = '';
         status = 'Preparing…';
         sidebar.refresh();
+        const label = core.actionLabel(name);
+        const started = Date.now();
+        if (label) {
+          output.appendLine('');
+          log(`▶ ${label} started`);
+        }
+        let outcome = `✔ ${label} succeeded`;
         try {
           await vscode.window.withProgress(
             { location: vscode.ProgressLocation.Notification, title: 'VXCode', cancellable: true },
@@ -471,6 +527,7 @@ export function activate(context: vscode.ExtensionContext): void {
                 status =
                   {
                     test: 'Tests passed',
+                    testWithoutBuilding: 'Tests passed',
                     run: 'App launched',
                     build: 'Build succeeded',
                     clean: 'Clean succeeded',
@@ -485,9 +542,11 @@ export function activate(context: vscode.ExtensionContext): void {
         } catch (error) {
           status = cancelled ? 'Cancelled' : 'Operation failed';
           lastError = cancelled ? '' : error.message || String(error);
-          output.appendLine(String(error));
+          outcome = cancelled ? `■ ${label} cancelled` : `✖ ${label} failed`;
+          log(`✖ ${String(error)}`);
           vscode.window.showErrorMessage(error.message || String(error));
         } finally {
+          if (label) log(`${outcome} — total time (${core.duration(Date.now() - started)})`);
           busy = false;
           sidebar.refresh();
         }
@@ -671,6 +730,60 @@ export function activate(context: vscode.ExtensionContext): void {
     }
     await renderPackages().catch((error) => vscode.window.showErrorMessage(error.message || String(error)));
   }
+  let buildOptionsPanel: vscode.WebviewPanel | undefined;
+  function showBuildOptions() {
+    if (!buildOptionsPanel) {
+      buildOptionsPanel = vscode.window.createWebviewPanel(
+        'VXCode.buildOptions',
+        'Build Options',
+        vscode.ViewColumn.Active,
+        { enableScripts: true, localResourceRoots: [] },
+      );
+      buildOptionsPanel.onDidDispose(() => (buildOptionsPanel = undefined), null, context.subscriptions);
+      buildOptionsPanel.webview.onDidReceiveMessage(handleBuildOptionsMessage, null, context.subscriptions);
+    }
+    buildOptionsPanel.reveal();
+    return renderBuildOptions();
+  }
+  async function renderBuildOptions() {
+    if (!buildOptionsPanel) return;
+    const optimizations = validOptimizations();
+    const onlyTesting = listSetting('onlyTesting');
+    const additionalArguments = listSetting('additionalBuildArguments');
+    buildOptionsPanel.webview.html = buildOptionsHtml(crypto.randomBytes(24).toString('base64'), {
+      optimizations,
+      onlyTesting,
+      additionalArguments,
+      preview: [
+        ...core.optimizationArgs(optimizations, true, supportsFlag(await xcodebuildHelp())),
+        ...additionalArguments,
+        ...core.onlyTestingArgs(onlyTesting),
+      ],
+    });
+  }
+  async function handleBuildOptionsMessage(message) {
+    if (!buildOptionActions.has(message?.action)) return;
+    const text = typeof message.text === 'string' ? message.text.slice(0, 20000) : '';
+    try {
+      if (message.action === 'saveTests')
+        return void (await config().update('onlyTesting', core.parseList(text), settingTarget()));
+      if (message.action === 'saveArguments')
+        return void (await config().update('additionalBuildArguments', core.parseArguments(text), settingTarget()));
+      let selected = validOptimizations();
+      if (message.action === 'all') selected = core.buildOptimizations.map((o) => o.id);
+      if (message.action === 'none') selected = [];
+      if (message.action === 'toggle') {
+        if (!optimizationIds.has(message.id)) return;
+        selected = selected.filter((id) => id !== message.id);
+        if (message.checked === true) selected.push(message.id);
+      }
+      const ordered = core.buildOptimizations.map((o) => o.id).filter((id) => selected.includes(id));
+      await config().update('buildOptimizations', ordered, settingTarget());
+    } catch (error) {
+      vscode.window.showErrorMessage(error.message || String(error));
+      await renderBuildOptions();
+    }
+  }
   register('packages', showPackages);
   register('resolvePackages', async () => {
     if (!project) await selectProject();
@@ -686,6 +799,7 @@ export function activate(context: vscode.ExtensionContext): void {
   register('selectSimulator', selectSimulator);
   register('selectConfiguration', selectConfiguration);
   register('test', () => build(false, true));
+  register('testWithoutBuilding', () => build(false, true, 'withoutBuilding'));
   register('build', () => build(false));
   register('run', () => build(true));
   register('clean', () => build(false, false, 'clean'));
@@ -694,6 +808,7 @@ export function activate(context: vscode.ExtensionContext): void {
     vscode.commands.registerCommand('VXCode.cancel', stop),
     vscode.commands.registerCommand('VXCode.showOutput', () => output.show()),
     vscode.commands.registerCommand('VXCode.selectDerivedData', selectDerivedData),
+    vscode.commands.registerCommand('VXCode.buildOptions', showBuildOptions),
     vscode.commands.registerCommand('VXCode.toggleDebugger', () =>
       config().update('attachDebugger', !config().get<boolean>('attachDebugger'), vscode.ConfigurationTarget.Global),
     ),

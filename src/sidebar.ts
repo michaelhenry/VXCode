@@ -16,6 +16,8 @@ const allowed = new Set([
   'toggleDebugger',
   'selectDerivedData',
   'packages',
+  'buildOptions',
+  'testWithoutBuilding',
 ]);
 export class Sidebar {
   private view: any;
@@ -47,7 +49,8 @@ export class Sidebar {
     <button class="selector" data-action="selectSimulator"><span class="label">SIMULATOR <span class="chevron">›</span></span><span class="value" id="device">Choose a simulator…</span></button>
     <button class="selector" data-action="selectDerivedData"><span class="label">DERIVED DATA <span class="chevron">›</span></span><span class="value" id="derivedData">Default</span></button>
     <button class="selector" data-action="selectConfiguration"><span class="label">CONFIGURATION <span class="chevron">›</span></span><span class="value" id="configuration">Debug</span></button>
-    <button class="selector" data-action="toggleDebugger" id="debug" role="switch" aria-checked="false"><span class="label">DEBUGGER</span><span class="value" id="debugText">Off</span></button><div class="actions"><button class="primary" data-action="run">▶ &nbsp; Build &amp; Run</button><button class="secondary" data-action="build">Build only</button><button class="secondary" data-action="test">Run tests</button><button class="secondary" data-action="clean">Clean build folder</button><button class="secondary" data-action="archive">Archive for device</button><button class="secondary" data-action="packages">Package dependencies</button><button class="secondary" data-action="cancel" id="cancel" hidden>Cancel operation</button></div>
+    <button class="selector" data-action="buildOptions"><span class="label">BUILD OPTIONS <span class="chevron">›</span></span><span class="value" id="buildOptions">Default</span></button>
+    <button class="selector" data-action="toggleDebugger" id="debug" role="switch" aria-checked="false"><span class="label">DEBUGGER</span><span class="value" id="debugText">Off</span></button><div class="actions"><button class="primary" data-action="run">▶ &nbsp; Build &amp; Run</button><button class="secondary" data-action="build">Build only</button><button class="secondary" data-action="test">Run tests</button><button class="secondary" data-action="testWithoutBuilding">Re-run tests (skip build)</button><button class="secondary" data-action="clean">Clean build folder</button><button class="secondary" data-action="archive">Archive for device</button><button class="secondary" data-action="packages">Package dependencies</button><button class="secondary" data-action="cancel" id="cancel" hidden>Cancel operation</button></div>
     <div id="error" role="alert"></div><div class="footer"><button class="text" data-action="showOutput">Open build output ↗</button><p class="hint">Uses Xcode tools on this Mac.<br>Apps open in Apple's Simulator.</p></div>
     <script nonce="${nonce}">
     const vscode=acquireVsCodeApi();
@@ -56,12 +59,13 @@ export class Sidebar {
       for(const key of ['project','scheme','device']){const el=document.getElementById(key);el.textContent=s[key]||({project:'Choose a project…',scheme:'Choose a scheme…',device:'Choose a simulator…'}[key]);el.title=s[key+'Detail']||s[key]||'';}
       const derived=document.getElementById('derivedData');derived.textContent=s.derivedData||'Default · per-project storage';derived.title=s.derivedDataDetail||'';
       document.getElementById('configuration').textContent=(s.configuration||'Debug')+' · iOS Simulator';
+      document.getElementById('buildOptions').textContent=s.buildOptions||'Default';
       document.getElementById('debug').setAttribute('aria-checked',String(!!s.debug));document.getElementById('debugText').textContent=s.debug?'On · attaches on Build & Run':'Off';
       document.getElementById('statusText').textContent=s.status;
       document.getElementById('status').className='status'+(s.busy?' busy':s.error?' error':'');
       document.getElementById('error').textContent=s.error||'';
       document.getElementById('cancel').hidden=!s.busy;
-      document.querySelectorAll('[data-action]').forEach(b=>b.disabled=s.busy&&!['cancel','showOutput'].includes(b.dataset.action));
+      document.querySelectorAll('[data-action]').forEach(b=>b.disabled=s.busy&&!['cancel','showOutput','buildOptions'].includes(b.dataset.action));
     });vscode.postMessage({action:'ready'});
     </script></body></html>`;
     const listener = view.webview.onDidReceiveMessage((message) => {

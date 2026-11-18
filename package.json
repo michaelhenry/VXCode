@@ -2,7 +2,7 @@
   "name": "vxcode",
   "displayName": "VXCode",
   "description": "Build and run iOS Simulator apps with Xcode tools on macOS.",
-  "version": "1.0.7",
+  "version": "1.0.8",
   "publisher": "MichaelHenry19",
   "license": "MIT",
   "engines": {
@@ -75,6 +75,10 @@
         "title": "VXCode: Test"
       },
       {
+        "command": "VXCode.testWithoutBuilding",
+        "title": "VXCode: Re-run Tests Without Building"
+      },
+      {
         "command": "VXCode.clean",
         "title": "VXCode: Clean Build Folder"
       },
@@ -97,6 +101,10 @@
       {
         "command": "VXCode.resolvePackages",
         "title": "VXCode: Resolve Package Dependencies"
+      },
+      {
+        "command": "VXCode.buildOptions",
+        "title": "VXCode: Build Options"
       }
     ],
     "configuration": {
@@ -127,6 +135,52 @@
           "type": "boolean",
           "default": false,
           "description": "Attach the Swift debugger (swiftlang.swift-vscode) when Build and Run launches the app."
+        },
+        "VXCode.buildOptimizations": {
+          "type": "array",
+          "default": [],
+          "scope": "resource",
+          "uniqueItems": true,
+          "items": {
+            "type": "string",
+            "enum": [
+              "noCodeCoverage",
+              "lockPackages",
+              "skipValidation",
+              "noPreviews",
+              "dwarf",
+              "compilationCache",
+              "parallelTesting"
+            ],
+            "enumDescriptions": [
+              "Pass -enableCodeCoverage NO when running tests.",
+              "Pass -disableAutomaticPackageResolution (use Package.resolved as-is).",
+              "Pass -skipPackagePluginValidation and -skipMacroValidation.",
+              "Set ENABLE_PREVIEWS=NO and ENABLE_DEBUG_DYLIB=NO.",
+              "Set DEBUG_INFORMATION_FORMAT=dwarf.",
+              "Set COMPILATION_CACHE_ENABLE_CACHING=YES.",
+              "Pass -parallel-testing-enabled YES when running tests."
+            ]
+          },
+          "markdownDescription": "Speedups applied to Build, Build and Run, Run tests and Clean (not Archive). Edit them in **VXCode: Build Options**."
+        },
+        "VXCode.onlyTesting": {
+          "type": "array",
+          "default": [],
+          "scope": "resource",
+          "items": {
+            "type": "string"
+          },
+          "markdownDescription": "Tests to run, each passed as `-only-testing:<value>` (`Target`, `Target/Class` or `Target/Class/testMethod`). Empty runs the whole scheme."
+        },
+        "VXCode.additionalBuildArguments": {
+          "type": "array",
+          "default": [],
+          "scope": "resource",
+          "items": {
+            "type": "string"
+          },
+          "markdownDescription": "Extra `xcodebuild` arguments appended to Build, Build and Run, Run tests and Clean, one array item per argument."
         }
       }
     },
@@ -147,7 +201,25 @@
           "type": "webview"
         }
       ]
-    }
+    },
+    "languages": [
+      {
+        "id": "vxcode-output",
+        "aliases": [
+          "VXCode Output"
+        ],
+        "mimetypes": [
+          "text/x-code-output"
+        ]
+      }
+    ],
+    "grammars": [
+      {
+        "language": "vxcode-output",
+        "scopeName": "source.vxcode-output",
+        "path": "./syntaxes/vxcode-output.tmLanguage.json"
+      }
+    ]
   },
   "icon": "media/vxcode-icon-greyscale.png",
   "devDependencies": {

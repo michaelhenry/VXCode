@@ -175,6 +175,52 @@ assert.deepStrictEqual(
   ['Debug', 'Release', 'Staging'],
 );
 assert.deepStrictEqual(core.configurations([]), []);
+assert.deepStrictEqual(core.optimizationArgs([], true), []);
+assert.deepStrictEqual(core.optimizationArgs(undefined, false), []);
+assert.deepStrictEqual(core.optimizationArgs(['parallelTesting', 'noCodeCoverage', 'unknown'], false), []);
+assert.deepStrictEqual(core.optimizationArgs(['parallelTesting', 'noCodeCoverage'], true), [
+  '-enableCodeCoverage',
+  'NO',
+  '-parallel-testing-enabled',
+  'YES',
+]);
+assert.deepStrictEqual(
+  core.optimizationArgs(['skipValidation', 'noPreviews'], false, (flag) => flag !== '-skipMacroValidation'),
+  ['-skipPackagePluginValidation', 'ENABLE_PREVIEWS=NO', 'ENABLE_DEBUG_DYLIB=NO'],
+);
+assert.strictEqual(
+  core.optimizationArgs(
+    core.buildOptimizations.map((o) => o.id),
+    true,
+  ).length,
+  11,
+);
+assert.deepStrictEqual(core.parseList(' AppTests/A \n\nAppTests/B, AppTests/A\n'), ['AppTests/A', 'AppTests/B']);
+assert.deepStrictEqual(core.parseList(''), []);
+assert.deepStrictEqual(core.parseArguments('-jobs\n 8 \n\nOTHER_SWIFT_FLAGS=-D A B\n'), [
+  '-jobs',
+  '8',
+  'OTHER_SWIFT_FLAGS=-D A B',
+]);
+assert.deepStrictEqual(core.onlyTestingArgs(['AppTests/A']), ['-only-testing:AppTests/A']);
+assert.deepStrictEqual(core.onlyTestingArgs(undefined), []);
+assert.strictEqual(core.buildOptionsSummary(0, 0, 0), 'Default');
+assert.strictEqual(core.buildOptionsSummary(1, 2, 0), '1 speedup · 2 test filters');
+assert.strictEqual(core.buildOptionsSummary(3, 0, 1), '3 speedups · 1 extra arg');
+{
+  const { buildOptionsHtml } = require('../src/buildOptions');
+  const html = buildOptionsHtml('n', {
+    optimizations: ['dwarf'],
+    onlyTesting: ['<img src=x>'],
+    additionalArguments: ['</textarea><script>'],
+    preview: ['DEBUG_INFORMATION_FORMAT=dwarf'],
+  });
+  assert(html.includes('data-id="dwarf" checked'));
+  assert(!html.includes('data-id="noCodeCoverage" checked'));
+  assert(!html.includes('<img src=x>') && html.includes('&lt;img src=x&gt;'));
+  assert(!html.includes('</textarea><script>'));
+  assert(html.includes('&quot;DEBUG_INFORMATION_FORMAT=dwarf&quot;'));
+}
 assert.deepStrictEqual(
   core.workspaceProjects(
     `<?xml version="1.0"?><Workspace version="1.0">
@@ -189,3 +235,34 @@ assert.deepStrictEqual(
   ),
   ['/ws/App.xcodeproj', '/ws/Libs/Lib.xcodeproj', '/abs/Other.xcodeproj', '/ws/Pods/Pods.xcodeproj'],
 );
+assert.strictEqual(core.timestamp(new Date(2026, 0, 2, 3, 4, 5, 6)), '03:04:05.006');
+assert.strictEqual(core.duration(0), '0ms');
+assert.strictEqual(core.duration(850), '850ms');
+assert.strictEqual(core.duration(12_345), '12.3s');
+assert.strictEqual(core.duration(125_000), '2m 05s');
+assert.strictEqual(core.duration(3_725_000), '1h 02m');
+{
+  // The output grammar must stay valid JSON with compilable patterns that match what exec() writes.
+  const grammar = require(require('path').join(__dirname, '../../syntaxes/vxcode-output.tmLanguage.json'));
+  const rule = (name) => new RegExp(grammar.repository[name].match);
+  assert(rule('timestamp').test('[14:03:27.042] ** BUILD SUCCEEDED **'));
+  assert(rule('command').test('[14:03:27.042] > /usr/bin/xcodebuild "-scheme" "App"'));
+  assert(rule('success').test('✔ xcodebuild finished (12.3s)'));
+  assert(rule('failure').test('✖ xcodebuild failed with exit code 65 (4.2s)'));
+  assert(rule('failure').test("Test Case '-[AppTests.FooTests testBar]' failed (0.010 seconds)."));
+  assert(rule('error').test('/tmp/App/View.swift:12:5: error: cannot find x in scope'));
+  assert(rule('warning').test('/tmp/App/View.swift:3:1: warning: unused variable'));
+  assert(rule('location').test('/tmp/App/View.swift:12:5'));
+  assert(rule('step').test('[14:03:27.042] CompileSwift normal arm64 /tmp/App/View.swift'));
+  assert(rule('duration').test('✔ xcodebuild finished (2m 05s)'));
+  assert(!rule('duration').test('Test Case passed (0.010 seconds).'));
+}
+assert.strictEqual(core.actionLabel('run'), 'Build & Run');
+assert.strictEqual(core.actionLabel('selectScheme'), undefined);
+{
+  const grammar = require(require('path').join(__dirname, '../../syntaxes/vxcode-output.tmLanguage.json'));
+  const rule = (name) => new RegExp(grammar.repository[name].match);
+  assert(rule('command').test('[14:03:21.000] ▶ Build & Run started'));
+  assert(rule('success').test('✔ Build & Run succeeded — total time (1m 02s)'));
+  assert(rule('duration').test('✔ Build & Run succeeded — total time (1m 02s)'));
+}

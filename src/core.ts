@@ -333,8 +333,120 @@ export function addPackage(
   }
   return text;
 }
+export interface BuildOptimization {
+  id: string;
+  label: string;
+  detail: string;
+  args: string[][];
+  testOnly?: boolean;
+}
+export const buildOptimizations: BuildOptimization[] = [
+  {
+    id: 'noCodeCoverage',
+    label: 'Skip code coverage',
+    detail: 'Runs tests without coverage instrumentation even when the scheme enables it.',
+    args: [['-enableCodeCoverage', 'NO']],
+    testOnly: true,
+  },
+  {
+    id: 'lockPackages',
+    label: 'Use Package.resolved as-is',
+    detail: 'Skips automatic package resolution. Run Resolve packages after changing dependencies.',
+    args: [['-disableAutomaticPackageResolution']],
+  },
+  {
+    id: 'skipValidation',
+    label: 'Skip package plugin and macro validation',
+    detail: 'Avoids trust checks for package plugins and macros such as those in TCA.',
+    args: [['-skipPackagePluginValidation'], ['-skipMacroValidation']],
+  },
+  {
+    id: 'noPreviews',
+    label: 'Skip SwiftUI preview support',
+    detail: 'Sets ENABLE_PREVIEWS=NO and ENABLE_DEBUG_DYLIB=NO, so no separate preview dylib is linked.',
+    args: [['ENABLE_PREVIEWS=NO'], ['ENABLE_DEBUG_DYLIB=NO']],
+  },
+  {
+    id: 'dwarf',
+    label: 'Skip dSYM generation',
+    detail: 'Sets DEBUG_INFORMATION_FORMAT=dwarf; debugging still works locally.',
+    args: [['DEBUG_INFORMATION_FORMAT=dwarf']],
+  },
+  {
+    id: 'compilationCache',
+    label: 'Compilation caching',
+    detail:
+      'Sets COMPILATION_CACHE_ENABLE_CACHING=YES to reuse compiled output across branches and cleans (Xcode 26+).',
+    args: [['COMPILATION_CACHE_ENABLE_CACHING=YES']],
+  },
+  {
+    id: 'parallelTesting',
+    label: 'Parallel testing',
+    detail: 'Runs test classes in parallel on Simulator clones.',
+    args: [['-parallel-testing-enabled', 'YES']],
+    testOnly: true,
+  },
+];
+export function optimizationArgs(
+  selected: readonly string[] | undefined,
+  testing: boolean,
+  supported: (flag: string) => boolean = () => true,
+): string[] {
+  const chosen = new Set(selected || []);
+  return buildOptimizations
+    .filter((o) => chosen.has(o.id) && (testing || !o.testOnly))
+    .flatMap((o) => o.args.filter(([flag]) => !flag.startsWith('-') || supported(flag)).flat());
+}
+export function parseList(text: string): string[] {
+  return [
+    ...new Set(
+      String(text ?? '')
+        .split(/[\n,]/)
+        .map((s) => s.trim())
+        .filter(Boolean),
+    ),
+  ];
+}
+export function parseArguments(text: string): string[] {
+  return String(text ?? '')
+    .split(/\r?\n/)
+    .map((s) => s.trim())
+    .filter(Boolean);
+}
+export const onlyTestingArgs = (tests: readonly string[] | undefined) => (tests || []).map((t) => `-only-testing:${t}`);
+export function buildOptionsSummary(optimizations: number, tests: number, extra: number): string {
+  const parts = [
+    optimizations && `${optimizations} speedup${optimizations === 1 ? '' : 's'}`,
+    tests && `${tests} test filter${tests === 1 ? '' : 's'}`,
+    extra && `${extra} extra arg${extra === 1 ? '' : 's'}`,
+  ].filter(Boolean);
+  return parts.length ? parts.join(' · ') : 'Default';
+}
 export const escapeHtml = (v: unknown) =>
   String(v ?? '').replace(
     /[&<>"']/g,
     (c) => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;' })[c]!,
   );
+const pad = (n: number, width = 2) => String(n).padStart(width, '0');
+/** Local wall-clock time for output lines, e.g. `14:03:27.042`. */
+export const timestamp = (date: Date) =>
+  `${pad(date.getHours())}:${pad(date.getMinutes())}:${pad(date.getSeconds())}.${pad(date.getMilliseconds(), 3)}`;
+/** Human-readable elapsed time, e.g. `850ms`, `12.3s`, `2m 05s`, `1h 02m`. */
+export function duration(ms: number): string {
+  if (ms < 1000) return `${Math.max(0, Math.round(ms))}ms`;
+  if (ms < 60_000) return `${(ms / 1000).toFixed(1)}s`;
+  const seconds = Math.floor(ms / 1000);
+  if (seconds < 3600) return `${Math.floor(seconds / 60)}m ${pad(seconds % 60)}s`;
+  return `${Math.floor(seconds / 3600)}h ${pad(Math.floor(seconds / 60) % 60)}m`;
+}
+/** Output labels for long-running actions whose total time is logged; pickers are not timed. */
+const actionLabels: Record<string, string> = {
+  build: 'Build',
+  run: 'Build & Run',
+  test: 'Test',
+  testWithoutBuilding: 'Test without building',
+  clean: 'Clean',
+  archive: 'Archive',
+  resolvePackages: 'Resolve packages',
+};
+export const actionLabel = (name: string): string | undefined => actionLabels[name];

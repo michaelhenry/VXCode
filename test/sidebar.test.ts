@@ -46,6 +46,8 @@ receiver({ action: 'archive' });
 receiver({ action: 'packages' });
 receiver({ action: 'selectDerivedData' });
 receiver({ action: 'selectConfiguration' });
+receiver({ action: 'buildOptions' });
+receiver({ action: 'testWithoutBuilding' });
 receiver({ action: 'arbitraryCommand' });
 receiver(null);
 assert.deepStrictEqual(commands, [
@@ -57,6 +59,8 @@ assert.deepStrictEqual(commands, [
   'VXCode.packages',
   'VXCode.selectDerivedData',
   'VXCode.selectConfiguration',
+  'VXCode.buildOptions',
+  'VXCode.testWithoutBuilding',
 ]);
 const scriptMatch = view.webview.html.match(/<script nonce="[^"]+">([\s\S]*?)<\/script>/);
 if (!scriptMatch) throw new Error('Sidebar HTML must contain its webview script.');
@@ -89,6 +93,9 @@ assert.strictEqual(element('configuration').textContent, 'Debug · iOS Simulator
 update({ data: { ...posted, configuration: 'Staging' } });
 assert.strictEqual(element('configuration').textContent, 'Staging · iOS Simulator');
 assert.strictEqual(element('derivedData').textContent, 'Default · per-project storage');
+assert.strictEqual(element('buildOptions').textContent, 'Default');
+update({ data: { ...posted, buildOptions: '3 speedups' } });
+assert.strictEqual(element('buildOptions').textContent, '3 speedups');
 update({ data: { ...posted, derivedData: '~/DD', derivedDataDetail: '/Users/me/DD' } });
 assert.strictEqual(element('derivedData').textContent, '~/DD');
 assert.strictEqual(element('derivedData').title, '/Users/me/DD');

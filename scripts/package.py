@@ -15,6 +15,6 @@ target = root / f"{p['name']}-{p['version']}.vsix"
 with ZipFile(target, 'w', ZIP_DEFLATED) as z:
     z.writestr('extension.vsixmanifest', manifest)
     z.writestr('[Content_Types].xml', '<?xml version="1.0"?><Types xmlns="http://schemas.openxmlformats.org/package/2006/content-types"><Default Extension="json" ContentType="application/json"/><Default Extension="png" ContentType="image/png"/><Default Extension="svg" ContentType="image/svg+xml"/><Default Extension="js" ContentType="application/javascript"/><Default Extension="md" ContentType="text/markdown"/><Default Extension="vsixmanifest" ContentType="text/xml"/><Default Extension="txt" ContentType="text/plain"/><Override PartName="/extension/LICENSE" ContentType="text/plain"/></Types>')
-    for file in [root/'package.json', root/'README.md', root/'LICENSE', *sorted((root/'build'/'src').glob('*.js')), *sorted((root/'media').glob('*'))]:
+    for file in [root/'package.json', root/'README.md', root/'LICENSE', *sorted((root/'build'/'src').glob('*.js')), *sorted((root/'media').glob('*')), *sorted((root/'syntaxes').glob('*.json'))]:
         z.write(file, 'extension/' + file.relative_to(root).as_posix())
 print(target)

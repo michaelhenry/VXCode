@@ -1,0 +1,59 @@
+{
+  "$schema": "https://raw.githubusercontent.com/martinring/tmlanguage/master/tmlanguage.json",
+  "name": "VXCode Output",
+  "scopeName": "source.vxcode-output",
+  "patterns": [
+    { "include": "#timestamp" },
+    { "include": "#command" },
+    { "include": "#failure" },
+    { "include": "#success" },
+    { "include": "#error" },
+    { "include": "#warning" },
+    { "include": "#note" },
+    { "include": "#step" },
+    { "include": "#location" },
+    { "include": "#duration" }
+  ],
+  "repository": {
+    "timestamp": {
+      "match": "^\\[\\d{2}:\\d{2}:\\d{2}\\.\\d{3}\\]",
+      "name": "comment.line.timestamp.vxcode-output"
+    },
+    "command": {
+      "match": "(?<=\\] )(?:>|▶) .*$",
+      "name": "keyword.control.command.vxcode-output"
+    },
+    "failure": {
+      "match": "(?:✖|■) .*$|\\*\\* [A-Z ]+ FAILED \\*\\*|Test Case '[^']*' failed.*$|\\bTest Suite '[^']*' failed.*$|\\bFAILED\\b|\\bBUILD INTERRUPTED\\b",
+      "name": "invalid.illegal.failure.vxcode-output token.error-token"
+    },
+    "success": {
+      "match": "✔ .*$|\\*\\* [A-Z ]+ SUCCEEDED \\*\\*|Test Case '[^']*' passed.*$|\\bTest Suite '[^']*' passed.*$",
+      "name": "markup.inserted.success.vxcode-output token.info-token"
+    },
+    "error": {
+      "match": "\\b(?:fatal )?error: .*$",
+      "name": "invalid.illegal.error.vxcode-output token.error-token"
+    },
+    "warning": {
+      "match": "\\bwarning: .*$",
+      "name": "markup.changed.warning.vxcode-output token.warn-token"
+    },
+    "note": {
+      "match": "\\bnote: .*$",
+      "name": "comment.block.note.vxcode-output token.debug-token"
+    },
+    "step": {
+      "match": "(?<=\\] )(?:CompileSwift(?:Sources)?|SwiftCompile|SwiftDriver(?:JobDiscovery)?|SwiftEmitModule|SwiftMergeGeneratedHeaders|CompileC|CompileAssetCatalog|CompileStoryboard|CompileXIB|CompileMetal|Ld|Libtool|CodeSign|ProcessInfoPlistFile|ProcessProductPackaging(?:DER)?|CopySwiftLibs|PhaseScriptExecution|CopyStringsFile|CpResource|CpHeader|GenerateDSYMFile|Touch|RegisterExecutionPolicyException|Validate|ExtractAppIntentsMetadata|LinkStoryboards|MkDir|WriteAuxiliaryFile|CreateBuildDirectory|ProcessXCFramework|ScanDependencies|EmitSwiftModule|Resolve Package Graph|Fetching|Cloning|Computing version|Creating working copy|Resolved source packages)\\b",
+      "name": "entity.name.function.step.vxcode-output"
+    },
+    "location": {
+      "match": "(?:/[^\\s:'\"]+)+\\.[A-Za-z0-9]+(?::\\d+(?::\\d+)?)?",
+      "name": "markup.underline.link.path.vxcode-output"
+    },
+    "duration": {
+      "match": "\\((?:\\d+ms|\\d+\\.\\d+s|\\d+m \\d{2}s|\\d+h \\d{2}m)\\)$",
+      "name": "constant.numeric.duration.vxcode-output"
+    }
+  }
+}
