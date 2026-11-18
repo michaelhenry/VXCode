@@ -175,6 +175,77 @@ export function activate(context: vscode.ExtensionContext): void {
     remember();
     sidebar.refresh();
   }
+  // Configuration lists rarely change, so cache them per project and invalidate when any project file changes.
+  type ConfigurationCache = { signature: string; configurations: string[] };
+  const configurationCache = new Map<string, ConfigurationCache>(
+    Object.entries(context.workspaceState.get('VXCode.configurations', {})),
+  );
+  const saveConfigurations = () =>
+    context.workspaceState.update('VXCode.configurations', Object.fromEntries(configurationCache));
+  function configurationSources(): { projects: string[]; signature: string } {
+    const mtime = (file: string) => {
+      try {
+        return fs.statSync(file).mtimeMs;
+      } catch (_) {
+        return 0;
+      }
+    };
+    let projects = [project];
+    const markers: string[] = [];
+    if (project.endsWith('.xcworkspace')) {
+      const contents = path.join(project, 'contents.xcworkspacedata');
+      markers.push(contents);
+      let xml = '';
+      try {
+        xml = fs.readFileSync(contents, 'utf8');
+      } catch (_) {
+        /* Unreadable workspace; fall back to the defaults below. */
+      }
+      projects = core.workspaceProjects(xml, project).filter((p) => fs.existsSync(p));
+    }
+    markers.push(...projects.map((p) => path.join(p, 'project.pbxproj')));
+    return { projects, signature: markers.map((m) => `${m}:${mtime(m)}`).join('|') };
+  }
+  async function projectConfigurations(refresh = false): Promise<string[]> {
+    const { projects, signature } = configurationSources();
+    const cached = configurationCache.get(project);
+    if (!refresh && cached?.signature === signature && cached.configurations.length) return cached.configurations;
+    const data: core.XcodeProjectData[] = [];
+    for (const p of projects)
+      data.push(await json('/usr/bin/xcodebuild', [...core.projectArgs(p), '-list', '-json'], path.dirname(p)));
+    const configurations = core.configurations(data);
+    if (configurations.length) {
+      configurationCache.set(project, { signature, configurations });
+      await saveConfigurations();
+    }
+    return configurations.length ? configurations : ['Debug', 'Release'];
+  }
+  async function selectConfiguration() {
+    if (!project) await selectProject();
+    const current = config().get<string>('configuration') || 'Debug';
+    let refresh = false;
+    for (;;) {
+      const choices = await projectConfigurations(refresh);
+      const picked = await vscode.window.showQuickPick(
+        [
+          ...choices.map((c) => ({ label: c, description: c === current ? 'Current' : undefined, value: c })),
+          { label: '$(refresh) Reload configurations', description: 'Read them again from Xcode', value: '' },
+        ],
+        { placeHolder: `Select build configuration (current: ${current})` },
+      );
+      if (!picked) throw new Error('Selection cancelled.');
+      if (!picked.value) {
+        refresh = true;
+        continue;
+      }
+      const target = vscode.workspace.workspaceFolders?.length
+        ? vscode.ConfigurationTarget.Workspace
+        : vscode.ConfigurationTarget.Global;
+      await config().update('configuration', picked.value, target);
+      sidebar.refresh();
+      return;
+    }
+  }
   async function selectSimulator() {
     const choices = core.simulators(await json('/usr/bin/xcrun', ['simctl', 'list', 'devices', 'available', '-j']));
     if (!choices.length)
@@ -613,6 +684,7 @@ export function activate(context: vscode.ExtensionContext): void {
   register('selectProject', selectProject);
   register('selectScheme', selectScheme);
   register('selectSimulator', selectSimulator);
+  register('selectConfiguration', selectConfiguration);
   register('test', () => build(false, true));
   register('build', () => build(false));
   register('run', () => build(true));

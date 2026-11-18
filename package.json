@@ -51,6 +51,10 @@
         "title": "VXCode: Select Simulator"
       },
       {
+        "command": "VXCode.selectConfiguration",
+        "title": "VXCode: Select Build Configuration"
+      },
+      {
         "command": "VXCode.build",
         "title": "VXCode: Build"
       },

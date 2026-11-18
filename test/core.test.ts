@@ -166,3 +166,26 @@ assert.strictEqual(core.portableDerivedData('/ws', '/ws'), '${workspaceFolder}')
 assert.strictEqual(core.portableDerivedData('/other/DD', '/ws'), '/other/DD');
 assert.strictEqual(core.portableDerivedData('/ws-two/DD', '/ws'), '/ws-two/DD');
 assert.strictEqual(core.portableDerivedData('/other/DD', undefined), '/other/DD');
+assert.deepStrictEqual(
+  core.configurations([
+    { project: { configurations: ['Release', 'Debug'] } },
+    { project: { configurations: ['Debug', 'Staging'] } },
+    { workspace: { schemes: ['App'] } },
+  ]),
+  ['Debug', 'Release', 'Staging'],
+);
+assert.deepStrictEqual(core.configurations([]), []);
+assert.deepStrictEqual(
+  core.workspaceProjects(
+    `<?xml version="1.0"?><Workspace version="1.0">
+      <FileRef location = "group:App.xcodeproj"></FileRef>
+      <FileRef location = "container:Libs/Lib.xcodeproj"></FileRef>
+      <FileRef location = "absolute:/abs/Other.xcodeproj"></FileRef>
+      <FileRef location = "group:Pods/Pods.xcodeproj"></FileRef>
+      <FileRef location = "group:App.xcodeproj"></FileRef>
+      <FileRef location = "group:README.md"></FileRef>
+    </Workspace>`,
+    '/ws/App.xcworkspace',
+  ),
+  ['/ws/App.xcodeproj', '/ws/Libs/Lib.xcodeproj', '/abs/Other.xcodeproj', '/ws/Pods/Pods.xcodeproj'],
+);

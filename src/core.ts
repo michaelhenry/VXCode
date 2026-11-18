@@ -2,7 +2,7 @@ import * as path from 'path';
 
 export interface XcodeProjectData {
   workspace?: { schemes?: string[] };
-  project?: { schemes?: string[] };
+  project?: { schemes?: string[]; configurations?: string[] };
 }
 export interface Simulator {
   name: string;
@@ -96,6 +96,18 @@ export function archiveArgs(project: string, scheme: string, derivedData: string
 }
 export function schemes(data: XcodeProjectData): string[] {
   return [...new Set(data.workspace?.schemes || data.project?.schemes || [])].sort();
+}
+export function configurations(data: XcodeProjectData[]): string[] {
+  return [...new Set(data.flatMap((d) => d.project?.configurations || []))].sort();
+}
+// Projects referenced by a workspace's contents.xcworkspacedata (`group:`, `container:` or `absolute:` locations).
+// Nested group prefixes are not resolved; projects that do not exist on disk are skipped by the caller.
+export function workspaceProjects(contents: string, workspace: string): string[] {
+  const base = path.dirname(workspace);
+  const found = [
+    ...contents.matchAll(/<FileRef\s+location\s*=\s*"(group|container|absolute):([^"]+?\.xcodeproj)"/g),
+  ].map(([, kind, location]) => (kind === 'absolute' ? location : path.resolve(base, location)));
+  return [...new Set(found)];
 }
 export function simulators(data: { devices?: Record<string, Simulator[]> }): Simulator[] {
   return Object.entries(data.devices || {})
