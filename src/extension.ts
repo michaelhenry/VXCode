@@ -29,6 +29,8 @@ export function activate(context: vscode.ExtensionContext): void {
     status,
     error: lastError,
     configuration: config().get('configuration'),
+    derivedData: config().get<string>('derivedDataPath') || '',
+    derivedDataDetail: project ? derivedDataLocation() : '',
     debug: !!config().get('attachDebugger'),
   }));
   context.subscriptions.push(
@@ -191,11 +193,64 @@ export function activate(context: vscode.ExtensionContext): void {
     remember();
     sidebar.refresh();
   }
-  async function derivedDataPath() {
+  function derivedDataLocation() {
+    const folder = vscode.workspace.getWorkspaceFolder(vscode.Uri.file(project))?.uri.fsPath;
+    const custom = core.customDerivedData(
+      config().get<string>('derivedDataPath'),
+      os.homedir(),
+      folder,
+      path.dirname(project),
+    );
     const hash = crypto.createHash('sha256').update(project).digest('hex').slice(0, 16);
-    const derived = path.join(context.globalStorageUri.fsPath, 'DerivedData', hash);
+    return custom || path.join(context.globalStorageUri.fsPath, 'DerivedData', hash);
+  }
+  async function derivedDataPath() {
+    const derived = derivedDataLocation();
     await vscode.workspace.fs.createDirectory(vscode.Uri.file(derived));
     return derived;
+  }
+  async function selectDerivedData() {
+    const current = config().get<string>('derivedDataPath') || '';
+    const items = [
+      { label: '$(folder) Choose folder…', value: 'browse' },
+      { label: '$(edit) Enter path…', description: 'Supports ~ and ${workspaceFolder}', value: 'enter' },
+      ...(current
+        ? [{ label: '$(discard) Use default', description: "VXCode's per-project storage", value: 'reset' }]
+        : []),
+    ];
+    const picked = await vscode.window.showQuickPick(items, {
+      placeHolder: current ? `DerivedData: ${current}` : 'DerivedData: default (per-project VXCode storage)',
+    });
+    if (!picked) return;
+    const workspaceFolder = project
+      ? vscode.workspace.getWorkspaceFolder(vscode.Uri.file(project))
+      : vscode.workspace.workspaceFolders?.[0];
+    let value = '';
+    if (picked.value === 'browse') {
+      const uri = (
+        await vscode.window.showOpenDialog({
+          canSelectFiles: false,
+          canSelectFolders: true,
+          canSelectMany: false,
+          openLabel: 'Use as DerivedData',
+          defaultUri: workspaceFolder?.uri,
+        })
+      )?.[0];
+      if (!uri) return;
+      value = core.portableDerivedData(uri.fsPath, workspaceFolder?.uri.fsPath);
+    } else if (picked.value === 'enter') {
+      const entered = await vscode.window.showInputBox({
+        prompt: 'DerivedData folder (absolute, ~/…, ${workspaceFolder}/…, or relative to the workspace folder)',
+        value: current || '${workspaceFolder}/.build/DerivedData',
+        validateInput: (text) => (text.trim() ? undefined : 'Enter a path, or choose "Use default".'),
+      });
+      if (entered === undefined) return;
+      value = entered.trim();
+    }
+    const target = vscode.workspace.workspaceFolders?.length
+      ? vscode.ConfigurationTarget.Workspace
+      : vscode.ConfigurationTarget.Global;
+    await config().update('derivedDataPath', value || undefined, target);
   }
   async function prepare(needsDevice = true) {
     if (!project) await selectProject();
@@ -566,6 +621,7 @@ export function activate(context: vscode.ExtensionContext): void {
   context.subscriptions.push(
     vscode.commands.registerCommand('VXCode.cancel', stop),
     vscode.commands.registerCommand('VXCode.showOutput', () => output.show()),
+    vscode.commands.registerCommand('VXCode.selectDerivedData', selectDerivedData),
     vscode.commands.registerCommand('VXCode.toggleDebugger', () =>
       config().update('attachDebugger', !config().get<boolean>('attachDebugger'), vscode.ConfigurationTarget.Global),
     ),

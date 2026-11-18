@@ -2,7 +2,7 @@
   "name": "vxcode",
   "displayName": "VXCode",
   "description": "Build and run iOS Simulator apps with Xcode tools on macOS.",
-  "version": "1.0.6",
+  "version": "1.0.7",
   "publisher": "MichaelHenry19",
   "license": "MIT",
   "engines": {
@@ -83,6 +83,10 @@
         "title": "VXCode: Toggle Debugger on Run"
       },
       {
+        "command": "VXCode.selectDerivedData",
+        "title": "VXCode: Set DerivedData Location"
+      },
+      {
         "command": "VXCode.packages",
         "title": "VXCode: Manage Package Dependencies"
       },
@@ -103,6 +107,12 @@
           "type": "string",
           "default": "",
           "description": "Optional Xcode Contents/Developer path (DEVELOPER_DIR)."
+        },
+        "VXCode.derivedDataPath": {
+          "type": "string",
+          "default": "",
+          "scope": "resource",
+          "markdownDescription": "Custom DerivedData folder passed to `xcodebuild -derivedDataPath`. Supports `~` and `${workspaceFolder}`; relative paths resolve against the workspace folder. Leave empty to use a per-project folder in VXCode's extension storage."
         },
         "VXCode.discoveryExclude": {
           "type": "string",

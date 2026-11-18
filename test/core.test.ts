@@ -151,3 +151,18 @@ assert.strictEqual(core.launchedPid('An error was encountered'), undefined);
   }
 }
 console.log('All core tests passed.');
+assert.strictEqual(core.customDerivedData('', '/Users/me', '/ws', '/ws/App'), undefined);
+assert.strictEqual(core.customDerivedData('  ', '/Users/me', '/ws', '/ws/App'), undefined);
+assert.strictEqual(core.customDerivedData('/tmp/DD', '/Users/me', '/ws', '/ws/App'), '/tmp/DD');
+assert.strictEqual(core.customDerivedData('~/DD', '/Users/me', '/ws', '/ws/App'), '/Users/me/DD');
+assert.strictEqual(
+  core.customDerivedData('${workspaceFolder}/.build/DD', '/Users/me', '/ws', '/ws/App'),
+  '/ws/.build/DD',
+);
+assert.strictEqual(core.customDerivedData('build/DD', '/Users/me', '/ws', '/ws/App'), '/ws/build/DD');
+assert.strictEqual(core.customDerivedData('build/DD', '/Users/me', undefined, '/proj'), '/proj/build/DD');
+assert.strictEqual(core.portableDerivedData('/ws/.build/DD', '/ws'), '${workspaceFolder}/.build/DD');
+assert.strictEqual(core.portableDerivedData('/ws', '/ws'), '${workspaceFolder}');
+assert.strictEqual(core.portableDerivedData('/other/DD', '/ws'), '/other/DD');
+assert.strictEqual(core.portableDerivedData('/ws-two/DD', '/ws'), '/ws-two/DD');
+assert.strictEqual(core.portableDerivedData('/other/DD', undefined), '/other/DD');
